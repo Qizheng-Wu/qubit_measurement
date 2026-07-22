@@ -1,0 +1,23 @@
+schema_version = 1
+
+[instruments.readout_vna]
+type = "vna"
+address = "USB0::0x2A8D::0x5A01::MY47100891::0::INSTR"
+timeout_s = 10.0
+read_termination = "\n"
+write_termination = "\n"
+
+[instruments.spectrum]
+type = "spectrum_analyzer"
+address = "TCPIP0::192.168.4.5::hislip0::INSTR"
+timeout_s = 30.0
+read_termination = "\n"
+write_termination = "\n"
+
+[instruments.mmcs]
+type = "mmcs"
+master_box = "box1"
+cleanup_timeout_s = 5.0
+
+[instruments.mmcs.boxes]
+box1 = "192.168.4.8"

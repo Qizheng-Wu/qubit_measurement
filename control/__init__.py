@@ -5,6 +5,7 @@ split into transport, driver, and domain layers.
 """
 
 from .core.exceptions import ControlError
+from .config import ControlConfig, load_control_config
 from .domain import (
     SpectrumAnalyzerController,
     SpectrumSweepConfig,
@@ -14,10 +15,13 @@ from .domain import (
     VnaTrace,
 )
 from .driver import MmcsHardwareDriver, SpectrumAnalyzerDriver, VnaDriver
+from .factory import InstrumentFactory
 from .transport import MmcsVendorTransport, VisaTransport
 
 __all__ = [
     "ControlError",
+    "ControlConfig",
+    "InstrumentFactory",
     "MmcsHardwareDriver",
     "MmcsVendorTransport",
     "SpectrumAnalyzerController",
@@ -29,4 +33,5 @@ __all__ = [
     "VnaDriver",
     "VnaSweepConfig",
     "VnaTrace",
+    "load_control_config",
 ]
