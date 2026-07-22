@@ -3,8 +3,6 @@ import math
 import numpy as np
 import time
 import pandas as pd
-import struct
-import array
 # import numba as nb
 from . import find_ip
 statisticalTime = 0  #初始化全局变量

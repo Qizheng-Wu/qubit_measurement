@@ -1,12 +1,9 @@
 # %%
-import matplotlib.pyplot as plt
-import numpy as np
 import scipy.signal as sp
-from pathlib import Path
 from tqdm import tqdm
 
-from labcodes import fileio, peak_find
-from labcodes.misc import start_stop, center_span
+from labcodes import peak_find
+from labcodes.misc import start_stop
 
 #%%
 from lab4.magpie import vna
@@ -203,7 +200,7 @@ def find_width(lf):
     # return peak_value, vna.center_sspan(peak_value*1e9, [freq_GHz2*1e9, 2000], [freq_GHz1*1e9, 1000], [freq_GHz0*1e9, 200])
     # return peak_value, vna.center_sspan(peak_value*1e9, [freq_GHz2*1e9, 500], [freq_GHz1*1e9, 500], [freq_GHz0*1e9, 100])
     # return peak_value, vna.center_sspan(peak_value*1e9, [freq_GHz2*1e9, 250], [freq_GHz1*1e9, 250], [freq_GHz0*1e9, 50])
-    return peak_value, vna.center_sspan(peak_value*1e9, [freq_GHz2*1e9, 120], [freq_GHz1*1e9, 120], [freq_GHz0*1e9, 50])
+    return peak_value, vna.center_sspan(peak_value * 1e9, [freq_GHz2 * 1e9, 120], [freq_GHz1 * 1e9, 120], [freq_GHz0 * 1e9, 50])
 
 
 power = 15
@@ -214,7 +211,7 @@ for _ in range(1):
     for im, fm in enumerate(tqdm(cable_modes)):
         # if im in [0, 1, 6, 7, 9, 10, 13, 14]: Band=400
         # else: continue
-        frrlist_Hz = vna.center_sspan(fm*1e9, [0.05e6, 1000], [0.5e6, 1000], [2.0e6, 500])
+        frrlist_Hz = vna.center_sspan(fm * 1e9, [0.05e6, 1000], [0.5e6, 1000], [2.0e6, 500])
         vna.scan(
             DIR,
             f'TESTm{im}={fm}GHz {power}dBm | 0db atten find frrlist',
@@ -428,7 +425,7 @@ vna.yoko.set_output_state(True)
 vna.yoko.set_level_slow(bias_V)
 
 vna.lo.set_output_state(True)
-vna.lo.set_freq_Hz(LO_freq_GHz*1e9)
+vna.lo.set_freq_Hz(LO_freq_GHz * 1e9)
 vna.lo.set_power_dBm(LO_power_dBm)
 
 

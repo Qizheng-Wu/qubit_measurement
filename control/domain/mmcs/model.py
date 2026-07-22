@@ -130,3 +130,11 @@ class PreparedMmcsProgram:
     program: MmcsProgram
     fingerprint: str
     connection_generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class RunningMmcsProgram:
+    """A prepared program that has been started by an executor."""
+
+    prepared: PreparedMmcsProgram
+    started_at_s: float

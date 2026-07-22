@@ -3,12 +3,11 @@
 from typing import Literal
 
 import numpy as np
-import time
 from lab4.mmcs import Runner
 from lab4.waveform import env
 from labcodes import state_disc
 from labcodes.misc import center_span, start_stop
-from labrad.units import GHz, MHz, ns, us, dBm
+from labrad.units import GHz, MHz, ns, us
 # from labrad_servers.registry import Registry
 from lab4.registry import Registry
 import time
@@ -224,8 +223,8 @@ def power_shift2(
 
     def func(_power_dBm, _frr_GHz, _sb_freq_MHz):
         qr["frr_GHz"] = _frr_GHz
-        vna.vna.set_start_Hz((_frr_GHz - 1e-3*_sb_freq_MHz) * 1e9)
-        vna.vna.set_stop_Hz((_frr_GHz - 1e-3*_sb_freq_MHz) * 1e9)
+        vna.vna.set_start_Hz((_frr_GHz - 1e-3 * _sb_freq_MHz) * 1e9)
+        vna.vna.set_stop_Hz((_frr_GHz - 1e-3 * _sb_freq_MHz) * 1e9)
         time.sleep(0.01)
 
         qr["DACrr"]["readout power dBm"] = _power_dBm
@@ -359,7 +358,7 @@ def two_tone(
         test_save['xy'] = qd.xy
         for k, _pa in _bias.items():
             if _pa != 0:
-                runner.devices[k].z += env.flattop(wall_ns*1e-9, _delay_ns*1e-9, _pa, w_s=5e-9)
+                runner.devices[k].z += env.flattop(wall_ns * 1e-9, _delay_ns * 1e-9, _pa, w_s=5e-9)
         wall_ns += _delay_ns + space_ns
 
         runner.apply_rr_pulse(wall_ns, qr)
@@ -439,7 +438,7 @@ def two_tone_p(
         qd.xy += qd.spectroscopyPulse(wall_ns, freq_GHz=_sb_freq_MHz*1e-3, len_ns=_delay_ns)
         for k, _pa in _bias.items():
             if _pa != 0:
-                runner.devices[k].z += env.flattop(wall_ns*1e-9, _delay_ns*1e-9, _pa, w_s=5e-9)
+                runner.devices[k].z += env.flattop(wall_ns * 1e-9, _delay_ns * 1e-9, _pa, w_s=5e-9)
         wall_ns += _delay_ns + space_ns
 
         runner.apply_rr_pulse(wall_ns, qr)
@@ -526,7 +525,7 @@ def t1_measure(
 
         for k, _pa in _bias.items():
             if _pa != 0:
-                runner.devices[k].z += env.flattop((wall_ns + _pi_len_ns)*1e-9, _wait_ns*1e-9, _pa, w_s=5e-9)
+                runner.devices[k].z += env.flattop((wall_ns + _pi_len_ns) * 1e-9, _wait_ns * 1e-9, _pa, w_s=5e-9)
 
         wall_ns += _pi_len_ns + _wait_ns + space_ns
 
@@ -902,7 +901,7 @@ def t1(
         wall_ns += q["pi"]["len_ns"] / 2
 
         if _zpa != 0:
-            q.z += env.rect(wall_ns*1e-9, _delay_ns*1e-9, _zpa)
+            q.z += env.rect(wall_ns * 1e-9, _delay_ns * 1e-9, _zpa)
         wall_ns += _delay_ns
 
         runner.apply_rr_pulse(wall_ns, q)
@@ -938,7 +937,7 @@ def th(
         wall_ns += q.reset(wall_ns)
 
         if _zpa != 0:
-            q.z += env.rect(wall_ns*1e-9, _delay_ns*1e-9, _zpa)
+            q.z += env.rect(wall_ns * 1e-9, _delay_ns * 1e-9, _zpa)
         wall_ns += _delay_ns
 
         runner.apply_rr_pulse(wall_ns, q)
@@ -981,7 +980,7 @@ def ramsey(
         wall_ns += q["piHalf"]["len_ns"] / 2  # TODO: with space?
 
         if _zpa != 0:
-            q.z += env.rect(wall_ns*1e-9, _delay_ns*1e-9, _zpa)
+            q.z += env.rect(wall_ns * 1e-9, _delay_ns * 1e-9, _zpa)
             detune_GHz = q["f10_GHz"] - q.fit.freq(_zpa)
             phase = 2 * np.pi * (detune_GHz - fringe_MHz*1e-3) * _delay_ns
         else:
@@ -1173,7 +1172,7 @@ def qb_spec(
         runner.set_wf_nothing()
 
         q.xy += q.spectroscopyPulse(wall_ns, freq_GHz=sb_freq_MHz*1e-3)
-        q.z += env.rect(wall_ns*1e-9, q["spectroscopy"]["len_ns"]*1e-9, _zpa)
+        q.z += env.rect(wall_ns * 1e-9, q["spectroscopy"]["len_ns"] * 1e-9, _zpa)
         wall_ns += q["spectroscopy"]["len_ns"] + 5
 
         runner.apply_rr_pulse(wall_ns, q)
@@ -1240,7 +1239,7 @@ def t1_scan(
 
         for k, _pa in _bias.items():
             if _pa != 0:
-                runner.devices[k].z += env.rect(wall_ns*1e-9, _delay_ns*1e-9, _pa)
+                runner.devices[k].z += env.rect(wall_ns * 1e-9, _delay_ns * 1e-9, _pa)
 
         wall_ns += _delay_ns + space_ns
 
@@ -1343,7 +1342,7 @@ def meas_distortion(
         wall_ns = 0
         runner.set_wf_nothing()
 
-        qz.z += env.rect(wall_ns*1e-9, _p_delay_ns*1e-9, _p_zpa)
+        qz.z += env.rect(wall_ns * 1e-9, _p_delay_ns * 1e-9, _p_zpa)
         wall_ns += _p_delay_ns
 
         wall_ns += _delay_ns
@@ -1352,7 +1351,7 @@ def meas_distortion(
         qr.xy += qr.piHalfPulse(wall_ns)
         wall_ns += qr["pi"]["len_ns"] / 2 + space_ns
 
-        qz.z += env.flattop(wall_ns*1e-9, _r_delay_ns*1e-9, _r_zpa, _r_width_ns*1e-9)
+        qz.z += env.flattop(wall_ns * 1e-9, _r_delay_ns * 1e-9, _r_zpa, _r_width_ns * 1e-9)
         wall_ns += _r_delay_ns + _r_width_ns + space_ns
 
         wall_ns += qr["pi"]["len_ns"] / 2

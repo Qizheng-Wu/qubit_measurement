@@ -203,7 +203,7 @@ class Runner:
 
             i_offset, q_offset = get_offset(dev.DACxy.ID, dev.DACxy.LO.get_freq_Hz())
             # NOTE: timing_lag risks shifting waveform out of time_frame.
-            xy_env = env.shift(dev.xy, dev["DACxy"]["timing lag ns"]*1e-9)
+            xy_env = env.shift(dev.xy, dev["DACxy"]["timing lag ns"] * 1e-9)
             if xy_env is env.NOTHING:
                 xy_pts = xy_env(time_frame[:40], fourier=False)
             else:
@@ -229,16 +229,16 @@ class Runner:
         devices = [q for q in self.devices.values() if q.DACrr is not None]
         boards = {dev.DACrr for dev in devices}
         n_rrs = len(self._rr_starts)
-        rr_envs = {bd: [env.NOTHING]*n_rrs for bd in boards}
+        rr_envs = {bd: [env.NOTHING] * n_rrs for bd in boards}
         for i in range(n_rrs):
             for q in devices:
-                rr_envs[q.DACrr][i] += env.shift(q.rrs[i], q["DACrr"]["timing lag ns"]*1e-9)
+                rr_envs[q.DACrr][i] += env.shift(q.rrs[i], q["DACrr"]["timing lag ns"] * 1e-9)
 
         rx_envs = {bd: env.NOTHING for bd in boards}
         for q in devices:
             if q.rx is env.NOTHING:
                 continue
-            rx_envs[q.DACrr] += env.shift(q.rx, q["DACrr"]["timing lag ns"]*1e-9)
+            rx_envs[q.DACrr] += env.shift(q.rx, q["DACrr"]["timing lag ns"] * 1e-9)
         rx_times = xy_times[xy_times < self._get_rr_start_ns()[0]]
 
         for da, envs in rr_envs.items():
@@ -285,7 +285,7 @@ class Runner:
         qid_zoff: dict[str, float] = {}
 
         for dev in z_devs:
-            z_env = env.shift(dev.z, dev["DACz"]["timing lag ns"]*1e-9)
+            z_env = env.shift(dev.z, dev["DACz"]["timing lag ns"] * 1e-9)
             if dev.z is env.NOTHING:
                 z_pts = z_env(time_frame[:40], fourier=False).real
             else:
@@ -302,7 +302,7 @@ class Runner:
         # Deal with z_no_ztalk
         for dev in z_devs:
             if z_env is env.NOTHING: continue
-            z_env = env.shift(dev.z_no_ztalk, dev["DACz"]["timing lag ns"]*1e-9)
+            z_env = env.shift(dev.z_no_ztalk, dev["DACz"]["timing lag ns"] * 1e-9)
             if dev.z is env.NOTHING:
                 z_pts = z_env(time_frame[:40], fourier=False).real
             else:
@@ -537,7 +537,7 @@ class Runner:
             if "readout_bias" not in dev.reg:
                 continue
             margin_ns = dev.reg.get('readout_bias_margin_ns', 0)
-            dev.z += env.flattop((start_ns - margin_ns)*1e-9, (bias_len_ns + 2*margin_ns)*1e-9, dev['readout_bias'], w_s=5e-9)
+            dev.z += env.flattop((start_ns - margin_ns) * 1e-9, (bias_len_ns + 2 * margin_ns) * 1e-9, dev['readout_bias'], w_s=5e-9)
             rr_ends.append(bias_len_ns)
         return max(rr_ends)
 

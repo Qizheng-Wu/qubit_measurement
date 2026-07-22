@@ -38,3 +38,16 @@ import os
 path = os.getenv("CONTROL_CONFIG", "config/instruments.local.toml")
 config = load_control_config(path)
 ```
+
+## MMCS AWG spectrum smoke experiment
+
+`experiment/mmcs_awg_spectrum.py` generates a periodic single tone on one MMCS
+DAC and acquires it with the configured spectrum analyzer.  Before running it,
+edit the hardware identifiers and set `DAC_SAMPLE_RATE_HZ` to the actual DAC
+sample rate.  The script remains a dry run until `RUN_HARDWARE` is explicitly
+set to `True`.
+
+Connect the DAC through suitable attenuation and verify the spectrum analyzer
+input limit before enabling hardware access.  The script starts MMCS without a
+blocking wait, acquires the spectrum, and always requests an MMCS stop before
+displaying the trace.

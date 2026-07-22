@@ -1,11 +1,8 @@
 #%%
-from pathlib import Path
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 import time
 
-from logqbit.logfolder import LogFolder
 from lab4.instr.rohde_schwarz_FPL1602 import SpectrumAnalyzer
 
 from MMCSDriver.mmcs_driver import MmcsDriver

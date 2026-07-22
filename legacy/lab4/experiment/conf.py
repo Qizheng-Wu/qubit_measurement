@@ -18,21 +18,11 @@ def setup_logger():
 
 # %%
 import pprint
-import time
-from importlib import reload
 from os import getcwd
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from lab4.magpie import basic
-from lab4.mmcs import Runner, runner
-from lab4.waveform import env
-from labcodes import state_disc, fileio
-from labcodes.misc import center_span, segments, start_stop
+from lab4.mmcs import runner
 from lab4.registry import Registry
 
-from logqbit.logfolder import LogFolder
 from lab4.instr.rohde_schwarz_FPL1602 import SpectrumAnalyzer
 
 # reg = Registry('config.yaml')

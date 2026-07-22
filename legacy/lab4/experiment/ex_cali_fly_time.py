@@ -10,7 +10,7 @@ from MMCSDriver.mmcs_driver import MmcsDriver
 # ==========================================
 now = datetime.datetime.now()  
 timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-path = f'./test_data/'
+path = f'test_data/'
 
 dac_name = 'da_box1pcie2ch12'
 adc_name = 'ad_box1pcie1ch12'

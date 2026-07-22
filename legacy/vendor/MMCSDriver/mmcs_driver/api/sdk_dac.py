@@ -1,8 +1,6 @@
 from .udp_base import udp_base
 from . import wave_send
-import time
 import numpy as np
-import datetime
 from tqdm import tqdm
 import os
 import struct
@@ -318,7 +316,7 @@ class sdk_dac():
         return version_date, version_code
         
     def SendDacWave(self, dac_board, dac_num, wave_type, wave_freq, min_amp_mv = -800, max_amp_mv = 800, output_type = 0):
-        wave_date = wave_send.wave_gen(wave_type, wave_freq, max_len = 2**14*12, min_amp_mv = min_amp_mv, max_amp_mv = max_amp_mv)
+        wave_date = wave_send.wave_gen(wave_type, wave_freq, max_len =2 ** 14 * 12, min_amp_mv = min_amp_mv, max_amp_mv = max_amp_mv)
         # wave_date = wave_send.wave_gen_max(wave_type, wave_freq, max_len = 2**14*12)
         # wave_date = 200*[65535]
         wave_date_align_8 = self.WaveLenAlign8(wave_date, output_type, 2**14*12)
@@ -326,7 +324,7 @@ class sdk_dac():
         self.SetDacOutputType(dac_board, dac_num, output_type)
 
     def SendDacWave_MAXMIN(self, dac_board, dac_num, wave_type, wave_freq, min_amp_mv = -800, max_amp_mv = 800, output_type = 0):
-        wave_date = wave_send.wave_gen(wave_type, wave_freq, max_len = 2**14*12, min_amp_mv = min_amp_mv, max_amp_mv = max_amp_mv)
+        wave_date = wave_send.wave_gen(wave_type, wave_freq, max_len =2 ** 14 * 12, min_amp_mv = min_amp_mv, max_amp_mv = max_amp_mv)
         # wave_date = wave_send.wave_gen_max(wave_type, wave_freq, max_len = 2**14*12)
         # wave_date = 200*[65535]
         wave_date_align_8 = self.WaveLenAlign8(wave_date, output_type, 2**14*12)

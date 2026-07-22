@@ -99,13 +99,13 @@ basic.two_tone(
 )
 
 # %%
-basic.two_tone(reg, 'Q4', 'G4', power=-10, fxy=start_stop(4.63, 4.68, 1e-3)*GHz, zpa=start_stop(0.6, -0.9, 0.02), reps=900)
-basic.two_tone(reg, 'Q2', 'G2', power=0, fxy=start_stop(7.15, 7.4, 1e-3)*GHz, zpa=start_stop(-0.3, 0.5, 0.02), reps=900)
-basic.two_tone(reg, 'Q2', 'C12', power=-15, fxy=start_stop(4.52, 4.6, 1e-3)*GHz, zpa=start_stop(-0.5, 0.5, 0.02), reps=900)
+basic.two_tone(reg, 'Q4', 'G4', power=-10, fxy=start_stop(4.63, 4.68, 1e-3) * GHz, zpa=start_stop(0.6, -0.9, 0.02), reps=900)
+basic.two_tone(reg, 'Q2', 'G2', power=0, fxy=start_stop(7.15, 7.4, 1e-3) * GHz, zpa=start_stop(-0.3, 0.5, 0.02), reps=900)
+basic.two_tone(reg, 'Q2', 'C12', power=-15, fxy=start_stop(4.52, 4.6, 1e-3) * GHz, zpa=start_stop(-0.5, 0.5, 0.02), reps=900)
 
 
 # %%
-basic.two_tone(reg, 'Q3', power=9, sb_freq=300*MHz, fxy=4.794*GHz, delay=start_stop(0, 1000, 5)*ns, reps=3000)
+basic.two_tone(reg, 'Q3', power=9, sb_freq=300 * MHz, fxy=4.794 * GHz, delay=start_stop(0, 1000, 5) * ns, reps=3000)
 # basic.two_tone(reg, 'Q2', power=9, sb_freq=0*MHz, fxy=4.292*GHz, delay=start_stop(0, 10, 0.2)*us, reps=900)
 # basic.two_tone(reg, 'Q2', power=9, sb_freq=0*MHz, fxy=start_stop(4.34, 4.26, 2e-3)*GHz, delay=start_stop(0, 10, n=3)*us, reps=900)
 

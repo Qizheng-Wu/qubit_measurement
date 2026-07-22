@@ -222,16 +222,16 @@ class Qubit:  # Okay to work with all boards being None.
         if local_df:
             phase = phase + 2 * np.pi * df_GHz * t0_ns  # the mix phase at t0 is -2*np.pi*df*t0
         if shape == "cosine":
-            x = env.cosine(t0_ns*1e-9, len_s=len_ns*1e-9, amp=amp, phase=phase)
+            x = env.cosine(t0_ns * 1e-9, len_s=len_ns * 1e-9, amp=amp, phase=phase)
         elif shape == "flattop":
-            x = env.flattop(t0_ns*1e-9, len_s=len_ns*1e-9, amp=amp, phase=phase)
+            x = env.flattop(t0_ns * 1e-9, len_s=len_ns * 1e-9, amp=amp, phase=phase)
         elif shape == "gaussian":
-            x = env.gaussian(t0_ns*1e-9, w_s=len_ns*1e-9, amp=amp, phase=phase)
+            x = env.gaussian(t0_ns * 1e-9, w_s=len_ns * 1e-9, amp=amp, phase=phase)
         else:
             raise ValueError(f"Invalid shape {shape}")
         y = -alpha * env.deriv(x) / delta
         pulse = x + 1j * y
-        return env.mix(pulse, (self["f10_GHz"] + df_GHz)*1e9 - self.DACxy.LO.get_freq_Hz())
+        return env.mix(pulse, (self["f10_GHz"] + df_GHz) * 1e9 - self.DACxy.LO.get_freq_Hz())
     
     def rx_pulse_sb(
         self,
@@ -251,16 +251,16 @@ class Qubit:  # Okay to work with all boards being None.
         if local_df:
             phase = phase + 2 * np.pi * df_GHz * t0_ns  # the mix phase at t0 is -2*np.pi*df*t0
         if shape == "cosine":
-            x = env.cosine(t0_ns*1e-9, len_s=len_ns*1e-9, amp=amp, phase=phase)
+            x = env.cosine(t0_ns * 1e-9, len_s=len_ns * 1e-9, amp=amp, phase=phase)
         elif shape == "flattop":
-            x = env.flattop(t0_ns*1e-9, len_s=len_ns*1e-9, amp=amp, phase=phase)
+            x = env.flattop(t0_ns * 1e-9, len_s=len_ns * 1e-9, amp=amp, phase=phase)
         elif shape == "gaussian":
-            x = env.gaussian(t0_ns*1e-9, w_s=len_ns*1e-9, amp=amp, phase=phase)
+            x = env.gaussian(t0_ns * 1e-9, w_s=len_ns * 1e-9, amp=amp, phase=phase)
         else:
             raise ValueError(f"Invalid shape {shape}")
         y = -alpha * env.deriv(x) / delta
         pulse = x + 1j * y
-        return env.mix(pulse, df_GHz*1e9)
+        return env.mix(pulse, df_GHz * 1e9)
 
     def piPulse(self, t0_ns, phase=0, **kwargs):
         kws = dict(self["pi"])
@@ -315,7 +315,7 @@ class Qubit:  # Okay to work with all boards being None.
                     amp=ringup_kws["relative amp"] * amp,
                 )
         
-        return env.mix(pulse, freq_GHz*1e9)
+        return env.mix(pulse, freq_GHz * 1e9)
 
     # Alias for backward compatibility.
     @property

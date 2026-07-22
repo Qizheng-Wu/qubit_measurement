@@ -16,6 +16,9 @@ from control.domain.mmcs import (
     PlaylistEntry,
     TriggerCommand,
     TriggerEvent,
+    SingleToneSpec,
+    build_cyclic_dac_program,
+    generate_single_tone,
     validate_program,
 )
 from control.driver.mmcs import MmcsHardwareDriver
@@ -100,6 +103,96 @@ def test_prepare_run_and_reuse_program():
     assert names.count("ad_clear_stored_data") == 3  # prepare plus each run
     with pytest.raises(ValueError):
         first.iq_by_adc["ad_box1pcie1ch12"].i_sum[0, 0] = 1
+
+
+def test_start_wait_stop_lifecycle():
+    backend = FakeMmcsBackend()
+    _, _, executor = make_stack(backend)
+    prepared = executor.prepare(make_program(adc_programs=()))
+
+    running = executor.start(prepared)
+    with pytest.raises(InstrumentStateError, match="already running"):
+        executor.start(prepared)
+    executor.stop(running)
+
+    second = executor.start(prepared)
+    result = executor.wait(second, timeout_s=1)
+    assert not result.iq_by_adc
+    names = [call[0] for call in backend.calls]
+    assert names.count("sys_run_level1_trigger") == 2
+    assert names.count("sys_wait_until_finish") == 1
+
+
+def test_wait_failure_cleans_up_and_releases_executor():
+    backend = FakeMmcsBackend(fail_method="sys_wait_until_finish")
+    _, _, executor = make_stack(backend)
+    prepared = executor.prepare(make_program(adc_programs=()))
+    running = executor.start(prepared)
+
+    with pytest.raises(InstrumentCommandError):
+        executor.wait(running, timeout_s=1)
+    with pytest.raises(InstrumentStateError, match="not active"):
+        executor.stop(running)
+
+
+def test_start_failure_cleans_up_and_releases_executor():
+    backend = FakeMmcsBackend(fail_method="sys_run_level1_trigger")
+    _, _, executor = make_stack(backend)
+    prepared = executor.prepare(make_program(adc_programs=()))
+
+    with pytest.raises(InstrumentCommandError):
+        executor.start(prepared)
+    executor.prepare(make_program(adc_programs=()))
+    names = [call[0] for call in backend.calls]
+    assert names.count("sys_stop_all_borad") >= 3
+
+
+def test_generate_single_tone_is_aligned_bounded_and_periodic():
+    tone = generate_single_tone(SingleToneSpec(2e9, 23e6, 0.1, 0.25, 801))
+    samples = tone.waveform.samples
+    assert samples.size >= 801 and samples.size % 8 == 0
+    assert np.max(np.abs(samples)) <= 0.1 + 1e-12
+    cycles = tone.actual_frequency_hz * samples.size / tone.spec.sample_rate_hz
+    assert cycles == pytest.approx(round(cycles))
+    first_after_repeat = 0.1 * np.sin(2 * np.pi * cycles + 0.25)
+    assert first_after_repeat == pytest.approx(samples[0])
+    assert abs(tone.actual_frequency_hz - 23e6) <= tone.spec.sample_rate_hz / samples.size / 2
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        lambda: SingleToneSpec(0, 1, 0.1),
+        lambda: SingleToneSpec(2e9, 1e9, 0.1),
+        lambda: SingleToneSpec(2e9, np.nan, 0.1),
+        lambda: SingleToneSpec(2e9, 20e6, 0),
+        lambda: SingleToneSpec(2e9, 20e6, 1.1),
+        lambda: SingleToneSpec(2e9, 20e6, 0.1, minimum_samples=7),
+    ],
+)
+def test_invalid_single_tone_is_rejected(spec):
+    with pytest.raises(ValidationError):
+        spec()
+
+
+def test_build_cyclic_dac_program():
+    tone = generate_single_tone(SingleToneSpec(2e9, 20e6, 0.02))
+    program = build_cyclic_dac_program(
+        tone.waveform,
+        board_id="da_box1pcie1ch12",
+        channel=DacChannel.I,
+        master_box="box1",
+        run_duration_s=0.003,
+        period_ns=1_000_000,
+    )
+    dac = program.dac_programs[0]
+    assert not program.adc_programs
+    assert program.repetitions == 3
+    assert dac.play_mode is DacPlayMode.CYCLE
+    assert [event.command for event in dac.triggers] == [
+        TriggerCommand.START,
+        TriggerCommand.STOP,
+    ]
 
 
 def test_prepared_program_invalid_after_reconnect():

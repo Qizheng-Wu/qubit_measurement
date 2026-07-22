@@ -18,6 +18,9 @@ from control.domain.mmcs import (
     MmcsProgram,
     PlaylistEntry,
     TriggerEvent,
+    SingleToneSpec,
+    build_cyclic_dac_program,
+    generate_single_tone,
 )
 from control.domain.sweep import (
     SpectrumAnalyzerController,
@@ -30,6 +33,7 @@ from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
 from control.driver.vna import VnaDriver
 from control.transport.mmcs_vendor import MmcsVendorTransport
 from control.transport.visa import VisaTransport
+from experiment.mmcs_awg_spectrum import acquire_spectrum_while_mmcs_runs
 
 
 pytestmark = [
@@ -95,3 +99,50 @@ def test_mmcs_zero_waveform_and_iq():
     with MmcsHardwareDriver(MmcsVendorTransport({"box1": ip})) as driver:
         result = MmcsExecutor(driver).execute(program, timeout_s=10)
     assert result.iq_by_adc[adc_id].i_average.shape[0] == 12
+
+
+def test_mmcs_awg_visible_on_spectrum_analyzer():
+    ip = os.environ.get("LAB_MMCS_IP")
+    dac_id = os.environ.get("LAB_MMCS_DAC_ID")
+    sample_rate = os.environ.get("LAB_MMCS_DAC_SAMPLE_RATE_HZ")
+    spectrum_resource = os.environ.get("LAB_SA_RESOURCE")
+    if not all((ip, dac_id, sample_rate, spectrum_resource)):
+        pytest.skip(
+            "LAB_MMCS_IP, LAB_MMCS_DAC_ID, LAB_MMCS_DAC_SAMPLE_RATE_HZ, "
+            "and LAB_SA_RESOURCE are required"
+        )
+
+    tone = generate_single_tone(
+        SingleToneSpec(
+            sample_rate_hz=float(sample_rate),
+            frequency_hz=20e6,
+            amplitude=0.02,
+        )
+    )
+    program = build_cyclic_dac_program(
+        tone.waveform,
+        board_id=dac_id,
+        channel=DacChannel.I,
+        master_box="box1",
+        run_duration_s=15,
+    )
+    sweep = SpectrumSweepConfig.from_center_span(
+        center_hz=tone.actual_frequency_hz,
+        span_hz=2e6,
+        points=11,
+        resolution_bandwidth_hz=100e3,
+        input_attenuation_db=20,
+    )
+
+    with MmcsHardwareDriver(MmcsVendorTransport({"box1": ip})) as mmcs_driver:
+        with SpectrumAnalyzerDriver(VisaTransport(spectrum_resource)) as analyzer_driver:
+            trace = acquire_spectrum_while_mmcs_runs(
+                MmcsExecutor(mmcs_driver),
+                SpectrumAnalyzerController(analyzer_driver),
+                program=program,
+                spectrum_config=sweep,
+                spectrum_timeout_s=10,
+            )
+
+    assert trace.power_dbm.shape == (11,)
+    assert np.all(np.isfinite(trace.power_dbm))

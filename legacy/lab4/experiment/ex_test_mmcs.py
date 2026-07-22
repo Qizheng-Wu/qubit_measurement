@@ -11,7 +11,7 @@ from pathlib import Path
 #%% 实验记录准备
 now = datetime.datetime.now()  
 timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-path = f'./test_data/'
+path = f'test_data/'
 path_json = f'./test_data/{timestamp}.json'
 Path(path).mkdir(parents=True,exist_ok=True)
 
