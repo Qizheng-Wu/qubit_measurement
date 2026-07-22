@@ -21,12 +21,11 @@ class InstrumentFactory:
 
     @staticmethod
     def _visa_transport(config: VnaDeviceConfig | SpectrumAnalyzerDeviceConfig) -> VisaTransport:
-        connection = config.connection
         return VisaTransport(
-            connection.address,
-            timeout_s=connection.transport_timeout_s,
-            read_termination=connection.read_termination,
-            write_termination=connection.write_termination,
+            config.address,
+            timeout_s=config.transport_timeout_s,
+            read_termination=config.read_termination,
+            write_termination=config.write_termination,
         )
 
     def create_vna(self, name: str) -> VnaDriver:

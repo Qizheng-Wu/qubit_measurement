@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
-
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from control.config import MmcsDeviceConfig, SpectrumAnalyzerDeviceConfig, load_control_config
 from control.core.exceptions import ConfigurationError
@@ -48,7 +47,7 @@ def test_load_v2_defaults_and_immutable_hardware_inventory(tmp_path):
     assert config.defaults.mmcs_awg.period_ns == 1_000_000
     with pytest.raises(TypeError):
         mmcs.dac_boards["new"] = mmcs.require_dac_board("da_box1pcie1ch12")
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(PydanticValidationError):
         config.defaults.mmcs_awg.period_ns = 2_000_000
 
 
@@ -97,10 +96,10 @@ def test_unknown_dac_board_is_configuration_error(tmp_path):
 @pytest.mark.parametrize(
     ("content", "message"),
     [
-        ("schema_version=1\n[instruments.x]\ntype='vna'\naddress='x'", "migrate"),
-        ("schema_version=3\n[instruments.x]\ntype='vna'\naddress='x'", "expected 2"),
+        ("schema_version=1\n[instruments.x]\ntype='vna'\naddress='x'", "schema_version"),
+        ("schema_version=3\n[instruments.x]\ntype='vna'\naddress='x'", "schema_version"),
         ("schema_version=2\n[instruments.x]\ntype='vna'", "address"),
-        ("schema_version=2\n[instruments.x]\ntype='vna'\naddress='x'\ntimeout_s=1", "unknown"),
+        ("schema_version=2\n[instruments.x]\ntype='vna'\naddress='x'\ntimeout_s=1", "timeout_s"),
         (
             "schema_version=2\n[instruments.m]\ntype='mmcs'\n"
             "[instruments.m.boxes]\nbox1='ip'",
@@ -113,7 +112,7 @@ def test_unknown_dac_board_is_configuration_error(tmp_path):
             "sample_rate_hz",
         ),
         (VALID_CONFIG + "\n[defaults.mmcs_awg]\nperiod_ns=101", "multiples of 4"),
-        (VALID_CONFIG + "\n[defaults.spectrum_sweep]\nextra=1", "unknown"),
+        (VALID_CONFIG + "\n[defaults.spectrum_sweep]\nextra=1", "extra"),
     ],
 )
 def test_invalid_v2_config_is_rejected(tmp_path, content, message):

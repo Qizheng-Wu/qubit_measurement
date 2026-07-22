@@ -2,101 +2,51 @@
 
 from __future__ import annotations
 
-import math
 from types import MappingProxyType
-from typing import Any, ClassVar, Literal, Mapping, TypeVar
+from typing import Annotated, Any, Literal, Mapping, TypeVar
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from control.core.exceptions import ConfigurationError
 from control.core.model import FrozenModel
 
-
-def _positive(value, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigurationError(f"{name} must be a number")
-    value = float(value)
-    if not math.isfinite(value) or value <= 0:
-        raise ConfigurationError(f"{name} must be finite and positive")
-    return value
+PositiveFloat = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
-def _non_negative(value, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigurationError(f"{name} must be a number")
-    value = float(value)
-    if not math.isfinite(value) or value < 0:
-        raise ConfigurationError(f"{name} must be finite and non-negative")
-    return value
-
-
-def _integer(value, minimum: int, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise ConfigurationError(f"{name} must be an integer >= {minimum}")
-    return value
-
-
-class VisaConnectionConfig(FrozenModel):
-    address: str
-    transport_timeout_s: float = 10.0
+class VisaDeviceConfig(FrozenModel):
+    address: Annotated[str, Field(min_length=1)]
+    transport_timeout_s: PositiveFloat = 10.0
     read_termination: str | None = "\n"
     write_termination: str | None = "\n"
 
-    def model_post_init(self, __context: Any) -> None:
-        if not isinstance(self.address, str) or not self.address.strip():
-            raise ConfigurationError("VISA address must be a non-empty string")
-        object.__setattr__(
-            self,
-            "transport_timeout_s",
-            _positive(self.transport_timeout_s, "transport_timeout_s"),
-        )
-        for name in ("read_termination", "write_termination"):
-            value = getattr(self, name)
-            if value is not None and not isinstance(value, str):
-                raise ConfigurationError(f"{name} must be a string or null")
+
+class VnaDeviceConfig(VisaDeviceConfig):
+    type: Literal["vna"] = "vna"
 
 
-class VnaDeviceConfig(FrozenModel):
-    connection: VisaConnectionConfig
-    type: ClassVar[Literal["vna"]] = "vna"
-
-
-class SpectrumAnalyzerDeviceConfig(FrozenModel):
-    connection: VisaConnectionConfig
-    type: ClassVar[Literal["spectrum_analyzer"]] = "spectrum_analyzer"
+class SpectrumAnalyzerDeviceConfig(VisaDeviceConfig):
+    type: Literal["spectrum_analyzer"] = "spectrum_analyzer"
 
 
 class MmcsDacBoardConfig(FrozenModel):
-    sample_rate_hz: float
-
-    def model_post_init(self, __context: Any) -> None:
-        object.__setattr__(self, "sample_rate_hz", _positive(self.sample_rate_hz, "sample_rate_hz"))
+    sample_rate_hz: PositiveFloat
 
 
 class MmcsDeviceConfig(FrozenModel):
-    boxes: Mapping[str, str]
+    type: Literal["mmcs"] = "mmcs"
+    boxes: Mapping[str, Annotated[str, Field(min_length=1)]]
     dac_boards: Mapping[str, MmcsDacBoardConfig]
-    type: ClassVar[Literal["mmcs"]] = "mmcs"
 
-    def model_post_init(self, __context: Any) -> None:
-        boxes = dict(self.boxes)
-        boards = dict(self.dac_boards)
-        if not boxes:
-            raise ConfigurationError("MMCS boxes must be a non-empty mapping")
-        if not boards:
-            raise ConfigurationError("MMCS dac_boards must be a non-empty mapping")
-        if not all(
-            isinstance(name, str) and name.strip() and isinstance(address, str) and address.strip()
-            for name, address in boxes.items()
-        ):
-            raise ConfigurationError("MMCS box names and addresses must be non-empty strings")
-        if not all(
-            isinstance(name, str) and name.strip() and isinstance(board, MmcsDacBoardConfig)
-            for name, board in boards.items()
-        ):
-            raise ConfigurationError("MMCS DAC board names must be non-empty strings")
-        object.__setattr__(self, "boxes", MappingProxyType(boxes))
-        object.__setattr__(self, "dac_boards", MappingProxyType(boards))
+    @model_validator(mode="after")
+    def freeze_inventory(self) -> "MmcsDeviceConfig":
+        if not self.boxes or not self.dac_boards:
+            raise ValueError("MMCS boxes and dac_boards must be non-empty")
+        if any(not name.strip() for name in (*self.boxes, *self.dac_boards)):
+            raise ValueError("MMCS box and DAC board names must be non-empty")
+        object.__setattr__(self, "boxes", MappingProxyType(dict(self.boxes)))
+        object.__setattr__(self, "dac_boards", MappingProxyType(dict(self.dac_boards)))
+        return self
 
     def require_dac_board(self, board_id: str) -> MmcsDacBoardConfig:
         try:
@@ -109,56 +59,36 @@ class MmcsDeviceConfig(FrozenModel):
 
 
 class VnaSweepDefaults(FrozenModel):
-    points: int = 1001
-    bandwidth_hz: float = 1e3
-    averages: int = 1
-    acquisition_timeout_s: float = 30.0
-
-    def model_post_init(self, __context: Any) -> None:
-        object.__setattr__(self, "points", _integer(self.points, 2, "points"))
-        object.__setattr__(self, "bandwidth_hz", _positive(self.bandwidth_hz, "bandwidth_hz"))
-        object.__setattr__(self, "averages", _integer(self.averages, 1, "averages"))
-        object.__setattr__(self, "acquisition_timeout_s", _positive(self.acquisition_timeout_s, "acquisition_timeout_s"))
+    points: Annotated[int, Field(ge=2)] = 1001
+    bandwidth_hz: PositiveFloat = 1e3
+    averages: Annotated[int, Field(ge=1)] = 1
+    acquisition_timeout_s: PositiveFloat = 30.0
 
 
 class SpectrumSweepDefaults(FrozenModel):
-    points: int = 501
-    rbw_span_ratio: float = 0.01
-    input_attenuation_db: float = 20.0
-    acquisition_timeout_s: float = 30.0
-
-    def model_post_init(self, __context: Any) -> None:
-        object.__setattr__(self, "points", _integer(self.points, 2, "points"))
-        object.__setattr__(self, "rbw_span_ratio", _positive(self.rbw_span_ratio, "rbw_span_ratio"))
-        object.__setattr__(self, "input_attenuation_db", _non_negative(self.input_attenuation_db, "input_attenuation_db"))
-        object.__setattr__(self, "acquisition_timeout_s", _positive(self.acquisition_timeout_s, "acquisition_timeout_s"))
+    points: Annotated[int, Field(ge=2)] = 501
+    rbw_span_ratio: PositiveFloat = 0.01
+    input_attenuation_db: NonNegativeFloat = 20.0
+    acquisition_timeout_s: PositiveFloat = 30.0
 
 
 class MmcsExecutionDefaults(FrozenModel):
-    cleanup_timeout_s: float = 5.0
-
-    def model_post_init(self, __context: Any) -> None:
-        object.__setattr__(self, "cleanup_timeout_s", _positive(self.cleanup_timeout_s, "cleanup_timeout_s"))
+    cleanup_timeout_s: PositiveFloat = 5.0
 
 
 class MmcsAwgDefaults(FrozenModel):
-    minimum_waveform_samples: int = 800
-    period_ns: int = 1_000_000
-    start_trigger_ns: int = 40
-    safety_margin_s: float = 5.0
+    minimum_waveform_samples: Annotated[int, Field(ge=8)] = 800
+    period_ns: Annotated[int, Field(ge=4)] = 1_000_000
+    start_trigger_ns: Annotated[int, Field(ge=4)] = 40
+    safety_margin_s: PositiveFloat = 5.0
 
-    def model_post_init(self, __context: Any) -> None:
-        minimum = _integer(self.minimum_waveform_samples, 8, "minimum_waveform_samples")
-        period = _integer(self.period_ns, 4, "period_ns")
-        start = _integer(self.start_trigger_ns, 4, "start_trigger_ns")
-        if period % 4 or start % 4:
-            raise ConfigurationError("period_ns and start_trigger_ns must be multiples of 4")
-        if start >= period - 4:
-            raise ConfigurationError("period_ns must leave room for START and STOP triggers")
-        object.__setattr__(self, "minimum_waveform_samples", minimum)
-        object.__setattr__(self, "period_ns", period)
-        object.__setattr__(self, "start_trigger_ns", start)
-        object.__setattr__(self, "safety_margin_s", _positive(self.safety_margin_s, "safety_margin_s"))
+    @model_validator(mode="after")
+    def validate_trigger_window(self) -> "MmcsAwgDefaults":
+        if self.period_ns % 4 or self.start_trigger_ns % 4:
+            raise ValueError("period_ns and start_trigger_ns must be multiples of 4")
+        if self.start_trigger_ns >= self.period_ns - 4:
+            raise ValueError("period_ns must leave room for START and STOP triggers")
+        return self
 
 
 class ControlDefaults(FrozenModel):
@@ -168,35 +98,43 @@ class ControlDefaults(FrozenModel):
     mmcs_awg: MmcsAwgDefaults = Field(default_factory=MmcsAwgDefaults)
 
 
-DeviceConfig = VnaDeviceConfig | SpectrumAnalyzerDeviceConfig | MmcsDeviceConfig
-DeviceConfigT = TypeVar("DeviceConfigT", bound=DeviceConfig)
+DeviceConfig = Annotated[
+    VnaDeviceConfig | SpectrumAnalyzerDeviceConfig | MmcsDeviceConfig,
+    Field(discriminator="type"),
+]
+DeviceConfigT = TypeVar(
+    "DeviceConfigT",
+    VnaDeviceConfig,
+    SpectrumAnalyzerDeviceConfig,
+    MmcsDeviceConfig,
+)
 
 
 class ControlConfig(FrozenModel):
-    schema_version: int
+    schema_version: Literal[2]
     instruments: Mapping[str, DeviceConfig]
     defaults: ControlDefaults = Field(default_factory=ControlDefaults)
 
-    def model_post_init(self, __context: Any) -> None:
-        if self.schema_version == 1:
-            raise ConfigurationError("schema_version 1 is no longer supported; migrate to schema_version 2")
-        if isinstance(self.schema_version, bool) or self.schema_version != 2:
-            raise ConfigurationError(f"Unsupported schema_version {self.schema_version!r}; expected 2")
-        instruments = dict(self.instruments)
-        if not instruments:
-            raise ConfigurationError("instruments must be a non-empty mapping")
-        if not all(isinstance(name, str) and name.strip() for name in instruments):
-            raise ConfigurationError("Instrument names must be non-empty strings")
-        object.__setattr__(self, "instruments", MappingProxyType(instruments))
+    @field_validator("instruments", mode="after")
+    @classmethod
+    def freeze_instruments(cls, value: Mapping[str, DeviceConfig]) -> Mapping[str, DeviceConfig]:
+        if not value:
+            raise ValueError("instruments must be non-empty")
+        if any(not name.strip() for name in value):
+            raise ValueError("instrument names must be non-empty")
+        return MappingProxyType(dict(value))
 
     def require(self, name: str, expected_type: type[DeviceConfigT]) -> DeviceConfigT:
         try:
             device = self.instruments[name]
         except KeyError as exc:
             available = ", ".join(sorted(self.instruments))
-            raise ConfigurationError(f"Instrument {name!r} is not configured; available: {available}") from exc
+            raise ConfigurationError(
+                f"Instrument {name!r} is not configured; available: {available}"
+            ) from exc
         if not isinstance(device, expected_type):
             raise ConfigurationError(
-                f"Instrument {name!r} has type {device.type!r}, expected {expected_type.__name__}"
+                f"Instrument {name!r} has type {device.type!r}, "
+                f"expected {expected_type.__name__}"
             )
         return device

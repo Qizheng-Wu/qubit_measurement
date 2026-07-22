@@ -5,16 +5,16 @@ from inspect import signature
 
 import numpy as np
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from control.application import (
-    AwgSpectrumEngineeringOverrides,
     MmcsAwgSpectrumExperiment,
     MmcsAwgSpectrumSpec,
 )
 from control.application.awg_spectrum import acquire_spectrum_while_mmcs_runs
 from control.config import (
     ControlConfig, MmcsDacBoardConfig, MmcsDeviceConfig,
-    SpectrumAnalyzerDeviceConfig, VisaConnectionConfig,
+    SpectrumAnalyzerDeviceConfig,
 )
 from control.core.exceptions import AcquisitionError, ConfigurationError
 from control.core.identity import InstrumentIdentity
@@ -25,13 +25,13 @@ from control.domain.trace import SpectrumTrace
 
 def make_config(sample_rate_hz=2e9):
     return ControlConfig(
-        2,
-        {
+        schema_version=2,
+        instruments={
             "mmcs": MmcsDeviceConfig(
-                {"box1": "192.0.2.1"},
-                {"da": MmcsDacBoardConfig(sample_rate_hz)},
+                boxes={"box1": "192.0.2.1"},
+                dac_boards={"da": MmcsDacBoardConfig(sample_rate_hz=sample_rate_hz)},
             ),
-            "sa": SpectrumAnalyzerDeviceConfig(VisaConnectionConfig("TCPIP0::SA")),
+            "sa": SpectrumAnalyzerDeviceConfig(address="TCPIP0::SA"),
         },
     )
 
@@ -53,19 +53,31 @@ def make_spec(**changes):
 
 
 def make_trace():
-    config = SpectrumSweepConfig(10e6, 30e6, 5, 100e3, 20)
+    config = SpectrumSweepConfig(
+        start_hz=10e6,
+        stop_hz=30e6,
+        points=5,
+        resolution_bandwidth_hz=100e3,
+        input_attenuation_db=20,
+    )
     return SpectrumTrace(
-        np.linspace(10e6, 30e6, 5),
-        np.array([-90, -80, -35, -82, -91]),
-        config,
-        InstrumentIdentity("R&S", "FPL", "1", "1", "R&S,FPL,1,1"),
-        datetime.now(timezone.utc),
+        frequency_hz=np.linspace(10e6, 30e6, 5),
+        power_dbm=np.array([-90, -80, -35, -82, -91]),
+        config=config,
+        instrument=InstrumentIdentity(
+            manufacturer="R&S",
+            model="FPL",
+            serial_number="1",
+            firmware="1",
+            raw="R&S,FPL,1,1",
+        ),
+        acquired_at=datetime.now(timezone.utc),
     )
 
 
-def test_spec_has_no_sample_rate_and_all_fields_are_required():
+def test_spec_has_no_sample_rate_and_physical_fields_are_required():
     assert "dac_sample_rate_hz" not in signature(MmcsAwgSpectrumSpec).parameters
-    with pytest.raises(TypeError):
+    with pytest.raises(PydanticValidationError):
         MmcsAwgSpectrumSpec()
 
 
@@ -81,8 +93,8 @@ def test_resolve_uses_board_sample_rate_and_shared_defaults():
 
 
 def test_engineering_overrides_cannot_change_sample_rate():
-    assert "sample_rate_hz" not in signature(AwgSpectrumEngineeringOverrides).parameters
-    overrides = AwgSpectrumEngineeringOverrides(
+    assert "sample_rate_hz" not in signature(MmcsAwgSpectrumSpec).parameters
+    spec = make_spec(
         points=101,
         resolution_bandwidth_hz=20e3,
         input_attenuation_db=30,
@@ -92,7 +104,7 @@ def test_engineering_overrides_cannot_change_sample_rate():
         start_trigger_ns=80,
         safety_margin_s=2,
     )
-    resolved = MmcsAwgSpectrumExperiment(make_config(2.4e9)).resolve(make_spec(), overrides)
+    resolved = MmcsAwgSpectrumExperiment(make_config(2.4e9)).resolve(spec)
     assert resolved.tone.spec.sample_rate_hz == 2.4e9
     assert resolved.tone.spec.minimum_samples == 1600
     assert resolved.spectrum_config.points == 101
@@ -116,9 +128,9 @@ def test_resolve_rejects_unknown_or_wrong_hardware_before_connect(changes, messa
 class FakeExecutor:
     def __init__(self, events, fail_stop=False):
         self.events, self.fail_stop = events, fail_stop
-    def prepare(self, program): self.events.append("prepare"); return program
-    def start(self, prepared): self.events.append("start"); return prepared
-    def stop(self, running):
+    def prepare(self, program): self.events.append("prepare")
+    def start(self): self.events.append("start")
+    def stop(self):
         self.events.append("stop")
         if self.fail_stop: raise RuntimeError("injected stop failure")
 

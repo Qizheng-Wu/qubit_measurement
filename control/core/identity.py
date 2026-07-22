@@ -17,4 +17,10 @@ class InstrumentIdentity(FrozenModel):
         raw = response.strip()
         fields = [field.strip() for field in raw.split(",")]
         fields.extend([""] * (4 - len(fields)))
-        return cls(*fields[:4], raw=raw)
+        return cls(
+            manufacturer=fields[0],
+            model=fields[1],
+            serial_number=fields[2],
+            firmware=fields[3],
+            raw=raw,
+        )

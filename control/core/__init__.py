@@ -12,19 +12,3 @@ from .exceptions import (
     ValidationError,
 )
 from .identity import InstrumentIdentity
-from .lifecycle import ConnectionState, InstrumentLifecycle
-
-__all__ = [
-    "AcquisitionError",
-    "ConfigurationError",
-    "ConnectionError",
-    "ConnectionState",
-    "ControlError",
-    "InstrumentCommandError",
-    "InstrumentIdentity",
-    "InstrumentLifecycle",
-    "InstrumentStateError",
-    "ProtocolError",
-    "TransportTimeoutError",
-    "ValidationError",
-]

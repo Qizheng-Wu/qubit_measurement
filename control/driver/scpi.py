@@ -7,7 +7,6 @@ from typing import Self
 
 from control.core.exceptions import ConnectionError, InstrumentCommandError
 from control.core.identity import InstrumentIdentity
-from control.core.lifecycle import ConnectionState
 from control.transport.visa import VisaTransport
 
 logger = logging.getLogger(__name__)
@@ -16,12 +15,12 @@ logger = logging.getLogger(__name__)
 class ScpiInstrumentDriver:
     def __init__(self, transport: VisaTransport) -> None:
         self.transport = transport
-        self._state = ConnectionState.DISCONNECTED
+        self._connected = False
         self._identity: InstrumentIdentity | None = None
 
     @property
     def is_connected(self) -> bool:
-        return self._state is ConnectionState.CONNECTED and self.transport.is_open
+        return self._connected and self.transport.is_open
 
     def connect(self) -> None:
         if self.is_connected:
@@ -34,9 +33,9 @@ class ScpiInstrumentDriver:
                 self.transport.close()
             except Exception as cleanup_exc:
                 exc.add_note(f"Closing transport after failed identification also failed: {cleanup_exc}")
-            self._state = ConnectionState.DISCONNECTED
+            self._connected = False
             raise
-        self._state = ConnectionState.CONNECTED
+        self._connected = True
 
     def identify(self) -> InstrumentIdentity:
         return InstrumentIdentity.parse(self.transport.query("*IDN?"))
@@ -67,7 +66,7 @@ class ScpiInstrumentDriver:
 
     def close(self) -> None:
         if not self.transport.is_open:
-            self._state = ConnectionState.CLOSED
+            self._connected = False
             return
         try:
             self.safe_shutdown()
@@ -75,7 +74,7 @@ class ScpiInstrumentDriver:
             logger.warning("Instrument safe shutdown failed", exc_info=True)
         finally:
             self.transport.close()
-            self._state = ConnectionState.CLOSED
+            self._connected = False
 
     def __enter__(self) -> Self:
         self.connect()

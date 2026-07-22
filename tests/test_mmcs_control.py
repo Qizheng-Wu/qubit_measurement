@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
-from control.core.exceptions import InstrumentCommandError, InstrumentStateError, ValidationError
+from control.application import MmcsExecutor
+from control.core.exceptions import InstrumentCommandError, InstrumentStateError
 from control.domain.mmcs import (
     AdcProgram,
     DacChannel,
@@ -11,15 +13,13 @@ from control.domain.mmcs import (
     DacProgram,
     DacWaveform,
     DemodulationWeights,
-    MmcsExecutor,
     MmcsProgram,
     PlaylistEntry,
+    SingleToneSpec,
     TriggerCommand,
     TriggerEvent,
-    SingleToneSpec,
     build_cyclic_dac_program,
     generate_single_tone,
-    validate_program,
 )
 from control.driver.mmcs import MmcsHardwareDriver
 from control.transport.mmcs_vendor import MmcsVendorTransport
@@ -48,28 +48,28 @@ class FakeMmcsBackend:
 
 
 def make_program(**changes):
-    waveform = DacWaveform(np.zeros(8))
-    weights = DemodulationWeights(0, np.zeros(8), np.zeros(8))
+    waveform = DacWaveform(samples=np.zeros(8))
+    weights = DemodulationWeights(channel=0, i=np.zeros(8), q=np.zeros(8))
     values = dict(
         master_box="box1",
         period_ns=100,
         repetitions=2,
         dac_programs=(
             DacProgram(
-                "da_box1pcie1ch12",
-                DacChannel.I,
-                (waveform,),
-                (PlaylistEntry(0, TriggerCommand.START),),
-                DacPlayMode.END_WITH_ZERO,
-                (TriggerEvent(40, TriggerCommand.START),),
+                board_id="da_box1pcie1ch12",
+                channel=DacChannel.I,
+                waveforms=(waveform,),
+                playlist=(PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),),
+                play_mode=DacPlayMode.END_WITH_ZERO,
+                triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
             ),
         ),
         adc_programs=(
             AdcProgram(
-                "ad_box1pcie1ch12",
-                8,
-                (weights,),
-                (TriggerEvent(40, TriggerCommand.START),),
+                board_id="ad_box1pcie1ch12",
+                sample_length=8,
+                demodulations=(weights,),
+                triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
             ),
         ),
     )
@@ -88,11 +88,13 @@ def make_stack(backend):
 
 def test_prepare_run_and_reuse_program():
     backend = FakeMmcsBackend()
-    transport, driver, executor = make_stack(backend)
-    prepared = executor.prepare(make_program())
+    _, _, executor = make_stack(backend)
+    executor.prepare(make_program())
 
-    first = executor.run(prepared, timeout_s=2)
-    second = executor.run(prepared, timeout_s=2)
+    executor.start()
+    first = executor.wait(timeout_s=2)
+    executor.start()
+    second = executor.wait(timeout_s=2)
 
     assert set(first.iq_by_adc) == {"ad_box1pcie1ch12"}
     assert first.iq_by_adc["ad_box1pcie1ch12"].i_sum.shape == (12, 2)
@@ -100,7 +102,7 @@ def test_prepare_run_and_reuse_program():
     names = [call[0] for call in backend.calls]
     assert names.count("da_set_multi_waveform") == 1
     assert names.count("sys_run_level1_trigger") == 2
-    assert names.count("ad_clear_stored_data") == 3  # prepare plus each run
+    assert names.count("ad_clear_stored_data") == 3
     with pytest.raises(ValueError):
         first.iq_by_adc["ad_box1pcie1ch12"].i_sum[0, 0] = 1
 
@@ -108,15 +110,15 @@ def test_prepare_run_and_reuse_program():
 def test_start_wait_stop_lifecycle():
     backend = FakeMmcsBackend()
     _, _, executor = make_stack(backend)
-    prepared = executor.prepare(make_program(adc_programs=()))
+    executor.prepare(make_program(adc_programs=()))
 
-    running = executor.start(prepared)
+    executor.start()
     with pytest.raises(InstrumentStateError, match="already running"):
-        executor.start(prepared)
-    executor.stop(running)
+        executor.start()
+    executor.stop()
 
-    second = executor.start(prepared)
-    result = executor.wait(second, timeout_s=1)
+    executor.start()
+    result = executor.wait(timeout_s=1)
     assert not result.iq_by_adc
     names = [call[0] for call in backend.calls]
     assert names.count("sys_run_level1_trigger") == 2
@@ -126,29 +128,41 @@ def test_start_wait_stop_lifecycle():
 def test_wait_failure_cleans_up_and_releases_executor():
     backend = FakeMmcsBackend(fail_method="sys_wait_until_finish")
     _, _, executor = make_stack(backend)
-    prepared = executor.prepare(make_program(adc_programs=()))
-    running = executor.start(prepared)
+    executor.prepare(make_program(adc_programs=()))
+    executor.start()
 
     with pytest.raises(InstrumentCommandError):
-        executor.wait(running, timeout_s=1)
-    with pytest.raises(InstrumentStateError, match="not active"):
-        executor.stop(running)
+        executor.wait(timeout_s=1)
+    with pytest.raises(InstrumentStateError, match="not running"):
+        executor.stop()
 
 
 def test_start_failure_cleans_up_and_releases_executor():
     backend = FakeMmcsBackend(fail_method="sys_run_level1_trigger")
     _, _, executor = make_stack(backend)
-    prepared = executor.prepare(make_program(adc_programs=()))
+    executor.prepare(make_program(adc_programs=()))
 
     with pytest.raises(InstrumentCommandError):
-        executor.start(prepared)
+        executor.start()
     executor.prepare(make_program(adc_programs=()))
     names = [call[0] for call in backend.calls]
     assert names.count("sys_stop_all_borad") >= 3
 
 
+def tone_spec(**changes):
+    values = dict(
+        sample_rate_hz=2e9,
+        frequency_hz=23e6,
+        amplitude=0.1,
+        phase_rad=0.25,
+        minimum_samples=801,
+    )
+    values.update(changes)
+    return SingleToneSpec(**values)
+
+
 def test_generate_single_tone_is_aligned_bounded_and_periodic():
-    tone = generate_single_tone(SingleToneSpec(2e9, 23e6, 0.1, 0.25, 801))
+    tone = generate_single_tone(tone_spec())
     samples = tone.waveform.samples
     assert samples.size >= 801 and samples.size % 8 == 0
     assert np.max(np.abs(samples)) <= 0.1 + 1e-12
@@ -160,23 +174,23 @@ def test_generate_single_tone_is_aligned_bounded_and_periodic():
 
 
 @pytest.mark.parametrize(
-    "spec",
+    "changes",
     [
-        lambda: SingleToneSpec(0, 1, 0.1, 0, 800),
-        lambda: SingleToneSpec(2e9, 1e9, 0.1, 0, 800),
-        lambda: SingleToneSpec(2e9, np.nan, 0.1, 0, 800),
-        lambda: SingleToneSpec(2e9, 20e6, 0, 0, 800),
-        lambda: SingleToneSpec(2e9, 20e6, 1.1, 0, 800),
-        lambda: SingleToneSpec(2e9, 20e6, 0.1, 0, 7),
+        {"sample_rate_hz": 0},
+        {"frequency_hz": 1e9},
+        {"frequency_hz": np.nan},
+        {"amplitude": 0},
+        {"amplitude": 1.1},
+        {"minimum_samples": 7},
     ],
 )
-def test_invalid_single_tone_is_rejected(spec):
-    with pytest.raises(ValidationError):
-        spec()
+def test_invalid_single_tone_is_rejected(changes):
+    with pytest.raises(PydanticValidationError):
+        tone_spec(**changes)
 
 
 def test_build_cyclic_dac_program():
-    tone = generate_single_tone(SingleToneSpec(2e9, 20e6, 0.02, 0, 800))
+    tone = generate_single_tone(tone_spec(frequency_hz=20e6, amplitude=0.02, phase_rad=0, minimum_samples=800))
     program = build_cyclic_dac_program(
         tone.waveform,
         board_id="da_box1pcie1ch12",
@@ -208,12 +222,12 @@ def test_prepared_program_invalid_after_reconnect():
     driver = MmcsHardwareDriver(transport, shutdown_timeout_s=5)
     driver.connect()
     executor = MmcsExecutor(driver, cleanup_timeout_s=5)
-    prepared = executor.prepare(make_program())
+    executor.prepare(make_program())
     driver.close()
     driver.connect()
 
-    with pytest.raises(InstrumentStateError):
-        executor.run(prepared, timeout_s=1)
+    with pytest.raises(InstrumentStateError, match="invalid after reconnect"):
+        executor.start()
 
 
 def test_prepare_failure_runs_cleanup_and_preserves_primary_error():
@@ -226,48 +240,50 @@ def test_prepare_failure_runs_cleanup_and_preserves_primary_error():
     assert names.count("sys_clear_all_level2_trigger_ram") >= 2
 
 
+def invalid_waveform_program():
+    dac = DacProgram(
+        board_id="da",
+        channel=DacChannel.I,
+        waveforms=(DacWaveform(samples=np.zeros(7)),),
+        playlist=(PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),),
+        play_mode=DacPlayMode.END_WITH_ZERO,
+        triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
+    )
+    return make_program(dac_programs=(dac,))
+
+
+def invalid_demodulation_program():
+    adc = AdcProgram(
+        board_id="ad",
+        sample_length=8,
+        demodulations=(DemodulationWeights(channel=12, i=np.zeros(8), q=np.zeros(8)),),
+        triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
+    )
+    return make_program(adc_programs=(adc,))
+
+
 @pytest.mark.parametrize(
-    "program",
+    "factory",
     [
-        make_program(repetitions=0),
-        make_program(period_ns=101),
-        make_program(
-            dac_programs=(
-                DacProgram(
-                    "da",
-                    DacChannel.I,
-                    (DacWaveform(np.zeros(7)),),
-                    (PlaylistEntry(0, TriggerCommand.START),),
-                    DacPlayMode.END_WITH_ZERO,
-                    (TriggerEvent(40, TriggerCommand.START),),
-                ),
-            )
-        ),
-        make_program(
+        lambda: make_program(repetitions=0),
+        lambda: make_program(period_ns=101),
+        invalid_waveform_program,
+        invalid_demodulation_program,
+        lambda: make_program(
             adc_programs=(
                 AdcProgram(
-                    "ad",
-                    8,
-                    (DemodulationWeights(12, np.zeros(8), np.zeros(8)),),
-                    (TriggerEvent(40, TriggerCommand.START),),
-                ),
-            )
-        ),
-        make_program(
-            adc_programs=(
-                AdcProgram(
-                    "ad",
-                    8,
-                    (),
-                    (TriggerEvent(100, TriggerCommand.START),),
+                    board_id="ad",
+                    sample_length=8,
+                    demodulations=(),
+                    triggers=(TriggerEvent(time_ns=100, command=TriggerCommand.START),),
                 ),
             )
         ),
     ],
 )
-def test_program_validation(program):
-    with pytest.raises(ValidationError):
-        validate_program(program)
+def test_program_validation_occurs_at_construction(factory):
+    with pytest.raises(PydanticValidationError):
+        factory()
 
 
 def test_vendor_transport_close_is_idempotent():

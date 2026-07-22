@@ -14,24 +14,24 @@ from control.domain.mmcs import (
     DacProgram,
     DacWaveform,
     DemodulationWeights,
-    MmcsExecutor,
     MmcsProgram,
     PlaylistEntry,
     TriggerEvent,
     TriggerCommand,
 )
-from control.domain.sweep import (
-    SpectrumAnalyzerController,
-    SpectrumSweepConfig,
-    VnaController,
-    VnaSweepConfig,
-)
+from control.domain.sweep import SpectrumSweepConfig, VnaSweepConfig
 from control.driver.mmcs import MmcsHardwareDriver
 from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
 from control.driver.vna import VnaDriver
 from control.transport.mmcs_vendor import MmcsVendorTransport
 from control.transport.visa import VisaTransport
-from control.application import MmcsAwgSpectrumExperiment, MmcsAwgSpectrumSpec
+from control.application import (
+    MmcsAwgSpectrumExperiment,
+    MmcsAwgSpectrumSpec,
+    MmcsExecutor,
+    SpectrumAnalyzerController,
+    VnaController,
+)
 from control.config import load_control_config
 
 
@@ -50,7 +50,11 @@ def test_vna_low_power_short_sweep():
         pytest.skip("LAB_VNA_RESOURCE is not configured")
     with VnaDriver(VisaTransport(resource, timeout_s=10, read_termination="\n", write_termination="\n")) as driver:
         trace = VnaController(driver).acquire(
-            VnaSweepConfig(4e9, 4.01e9, 11, 1e5, -60, 1), timeout_s=30
+            VnaSweepConfig(
+                start_hz=4e9, stop_hz=4.01e9, points=11,
+                bandwidth_hz=1e5, power_dbm=-60, averages=1,
+            ),
+            timeout_s=30,
         )
     assert trace.s_parameter.shape == (11,)
 
@@ -61,7 +65,11 @@ def test_spectrum_analyzer_short_sweep():
         pytest.skip("LAB_SA_RESOURCE is not configured")
     with SpectrumAnalyzerDriver(VisaTransport(resource, timeout_s=10, read_termination="\n", write_termination="\n")) as driver:
         trace = SpectrumAnalyzerController(driver).acquire(
-            SpectrumSweepConfig(4e9, 4.01e9, 11, 1e5, 20), timeout_s=30
+            SpectrumSweepConfig(
+                start_hz=4e9, stop_hz=4.01e9, points=11,
+                resolution_bandwidth_hz=1e5, input_attenuation_db=20,
+            ),
+            timeout_s=30,
         )
     assert trace.power_dbm.shape == (11,)
 
@@ -78,20 +86,22 @@ def test_mmcs_zero_waveform_and_iq():
         repetitions=1,
         dac_programs=(
             DacProgram(
-                dac_id,
-                DacChannel.I,
-                (DacWaveform(np.zeros(8)),),
-                (PlaylistEntry(0, TriggerCommand.START),),
-                DacPlayMode.END_WITH_ZERO,
-                (TriggerEvent(40, TriggerCommand.START),),
+                board_id=dac_id,
+                channel=DacChannel.I,
+                waveforms=(DacWaveform(samples=np.zeros(8)),),
+                playlist=(PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),),
+                play_mode=DacPlayMode.END_WITH_ZERO,
+                triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
             ),
         ),
         adc_programs=(
             AdcProgram(
-                adc_id,
-                8,
-                (DemodulationWeights(0, np.zeros(8), np.zeros(8)),),
-                (TriggerEvent(40, TriggerCommand.START),),
+                board_id=adc_id,
+                sample_length=8,
+                demodulations=(
+                    DemodulationWeights(channel=0, i=np.zeros(8), q=np.zeros(8)),
+                ),
+                triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
             ),
         ),
     )

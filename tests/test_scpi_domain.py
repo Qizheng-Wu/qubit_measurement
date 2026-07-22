@@ -4,19 +4,15 @@ from contextlib import contextmanager
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
+from control.application import SpectrumAnalyzerController, VnaController
 from control.core.exceptions import (
     AcquisitionError,
     ProtocolError,
     TransportTimeoutError,
-    ValidationError,
 )
-from control.domain.sweep import (
-    SpectrumAnalyzerController,
-    SpectrumSweepConfig,
-    VnaController,
-    VnaSweepConfig,
-)
+from control.domain.sweep import SpectrumSweepConfig, VnaSweepConfig
 from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
 from control.driver.vna import VnaDriver
 
@@ -75,7 +71,10 @@ def test_vna_acquire_and_restore_output():
     )
     driver = VnaDriver(transport)
     driver.connect()
-    config = VnaSweepConfig(1e9, 2e9, 3, 1e3, -30, 2)
+    config = VnaSweepConfig(
+        start_hz=1e9, stop_hz=2e9, points=3,
+        bandwidth_hz=1e3, power_dbm=-30, averages=2,
+    )
 
     trace = VnaController(driver).acquire(config, timeout_s=5)
 
@@ -97,7 +96,11 @@ def test_vna_protocol_error_aborts_and_restores():
     driver.connect()
     with pytest.raises(ProtocolError):
         VnaController(driver).acquire(
-            VnaSweepConfig(1, 2, 2, 100, -20, 1), timeout_s=1
+            VnaSweepConfig(
+                start_hz=1, stop_hz=2, points=2,
+                bandwidth_hz=100, power_dbm=-20, averages=1,
+            ),
+            timeout_s=1,
         )
     assert ("write", ":ABORT") in transport.commands
     assert transport.commands[-1] == ("write", "OUTP 1")
@@ -110,7 +113,10 @@ def test_spectrum_analyzer_acquire():
     )
     driver = SpectrumAnalyzerDriver(transport)
     driver.connect()
-    config = SpectrumSweepConfig(4e9, 5e9, 3, 10e3, 10)
+    config = SpectrumSweepConfig(
+        start_hz=4e9, stop_hz=5e9, points=3,
+        resolution_bandwidth_hz=10e3, input_attenuation_db=10,
+    )
 
     trace = SpectrumAnalyzerController(driver).acquire(config, timeout_s=3)
 
@@ -122,11 +128,11 @@ def test_spectrum_analyzer_acquire():
 @pytest.mark.parametrize(
     "factory",
     [
-        lambda: VnaSweepConfig(2, 1, 2, 100, -20, 1),
-        lambda: VnaSweepConfig(1, 2, 1, 100, -20, 1),
-        lambda: VnaSweepConfig(1, 2, 2, 100, 20, 1),
-        lambda: SpectrumSweepConfig(1, 2, 2, 0, 0),
-        lambda: SpectrumSweepConfig(1, 2, 2, 100, -1),
+        lambda: VnaSweepConfig(start_hz=2, stop_hz=1, points=2, bandwidth_hz=100, power_dbm=-20, averages=1),
+        lambda: VnaSweepConfig(start_hz=1, stop_hz=2, points=1, bandwidth_hz=100, power_dbm=-20, averages=1),
+        lambda: VnaSweepConfig(start_hz=1, stop_hz=2, points=2, bandwidth_hz=100, power_dbm=20, averages=1),
+        lambda: SpectrumSweepConfig(start_hz=1, stop_hz=2, points=2, resolution_bandwidth_hz=0, input_attenuation_db=0),
+        lambda: SpectrumSweepConfig(start_hz=1, stop_hz=2, points=2, resolution_bandwidth_hz=100, input_attenuation_db=-1),
     ],
 )
 def test_invalid_sweep_config(factory):
@@ -143,7 +149,10 @@ def test_operation_timeout_propagates_and_restores_transport_timeout():
     driver = VnaDriver(transport)
     driver.connect()
     with pytest.raises(TransportTimeoutError):
-        VnaController(driver).acquire(VnaSweepConfig(1, 2, 2, 100, -20, 1), timeout_s=2)
+        VnaController(driver).acquire(
+            VnaSweepConfig(start_hz=1, stop_hz=2, points=2, bandwidth_hz=100, power_dbm=-20, averages=1),
+            timeout_s=2,
+        )
     assert transport.timeout_s == 10
 
 
@@ -156,4 +165,7 @@ def test_successful_vna_acquisition_reports_restore_failure():
     driver = VnaDriver(transport)
     driver.connect()
     with pytest.raises(AcquisitionError, match="failed to restore state"):
-        VnaController(driver).acquire(VnaSweepConfig(1, 2, 2, 100, -20, 1), timeout_s=2)
+        VnaController(driver).acquire(
+            VnaSweepConfig(start_hz=1, stop_hz=2, points=2, bandwidth_hz=100, power_dbm=-20, averages=1),
+            timeout_s=2,
+        )

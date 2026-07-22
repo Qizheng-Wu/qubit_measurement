@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Annotated
 
 import numpy as np
+from pydantic import Field, model_validator
 
 from control.core.exceptions import ValidationError
 from control.core.model import FrozenModel
@@ -14,28 +15,17 @@ from .model import DacWaveform
 
 
 class SingleToneSpec(FrozenModel):
-    sample_rate_hz: float
-    frequency_hz: float
-    amplitude: float
-    phase_rad: float
-    minimum_samples: int
+    sample_rate_hz: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    frequency_hz: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    amplitude: Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
+    phase_rad: Annotated[float, Field(allow_inf_nan=False)]
+    minimum_samples: Annotated[int, Field(ge=8)]
 
-    def model_post_init(self, __context: Any) -> None:
-        numeric = (self.sample_rate_hz, self.frequency_hz, self.amplitude, self.phase_rad)
-        if not np.isfinite(numeric).all():
-            raise ValidationError("Single-tone parameters must be finite")
-        if self.sample_rate_hz <= 0:
-            raise ValidationError("sample_rate_hz must be positive")
-        if not 0 < self.frequency_hz < self.sample_rate_hz / 2:
-            raise ValidationError("frequency_hz must be between 0 and the Nyquist frequency")
-        if not 0 < self.amplitude <= 1:
-            raise ValidationError("amplitude must be in (0, 1]")
-        if (
-            isinstance(self.minimum_samples, bool)
-            or not isinstance(self.minimum_samples, int)
-            or self.minimum_samples < 8
-        ):
-            raise ValidationError("minimum_samples must be an integer >= 8")
+    @model_validator(mode="after")
+    def below_nyquist(self) -> "SingleToneSpec":
+        if self.frequency_hz >= self.sample_rate_hz / 2:
+            raise ValueError("frequency_hz must be below the Nyquist frequency")
+        return self
 
 
 class GeneratedSingleTone(FrozenModel):
@@ -63,6 +53,6 @@ def generate_single_tone(spec: SingleToneSpec) -> GeneratedSingleTone:
     samples = spec.amplitude * np.sin(phase + spec.phase_rad)
     return GeneratedSingleTone(
         spec=spec,
-        waveform=DacWaveform(samples),
+        waveform=DacWaveform(samples=samples),
         actual_frequency_hz=actual_frequency_hz,
     )
