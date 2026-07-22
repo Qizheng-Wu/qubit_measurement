@@ -1,10 +1,9 @@
 """Instrument identity value objects."""
 
-from dataclasses import dataclass
+from control.core.model import FrozenModel
 
 
-@dataclass(frozen=True, slots=True)
-class InstrumentIdentity:
+class InstrumentIdentity(FrozenModel):
     """Parsed response to the IEEE-488.2 ``*IDN?`` query."""
 
     manufacturer: str

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 import numpy as np
 
 from control.config import ControlConfig, MmcsDeviceConfig, SpectrumAnalyzerDeviceConfig
 from control.core.exceptions import AcquisitionError, ConfigurationError, ValidationError
+from control.core.model import FrozenModel
 from control.domain.mmcs import (
     DacChannel, GeneratedSingleTone, MmcsExecutor, MmcsProgram,
     PreparedMmcsProgram, RunningMmcsProgram, SingleToneSpec,
@@ -18,8 +18,7 @@ from control.domain.trace import SpectrumTrace
 from control.factory import InstrumentFactory
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class MmcsAwgSpectrumSpec:
+class MmcsAwgSpectrumSpec(FrozenModel):
     mmcs_name: str
     spectrum_analyzer_name: str
     master_box: str
@@ -30,7 +29,7 @@ class MmcsAwgSpectrumSpec:
     tone_phase_rad: float
     spectrum_span_hz: float
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         for name in ("mmcs_name", "spectrum_analyzer_name", "master_box", "dac_board_id"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
@@ -41,8 +40,7 @@ class MmcsAwgSpectrumSpec:
             raise ValidationError("spectrum_span_hz must be finite and positive")
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class AwgSpectrumEngineeringOverrides:
+class AwgSpectrumEngineeringOverrides(FrozenModel):
     points: int | None = None
     resolution_bandwidth_hz: float | None = None
     input_attenuation_db: float | None = None
@@ -53,8 +51,7 @@ class AwgSpectrumEngineeringOverrides:
     safety_margin_s: float | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ResolvedAwgSpectrum:
+class ResolvedAwgSpectrum(FrozenModel):
     spec: MmcsAwgSpectrumSpec
     tone: GeneratedSingleTone
     program: MmcsProgram
@@ -67,8 +64,7 @@ class ResolvedAwgSpectrum:
         return self.acquisition_timeout_s + self.safety_margin_s
 
 
-@dataclass(frozen=True, slots=True)
-class AwgSpectrumResult:
+class AwgSpectrumResult(FrozenModel):
     trace: SpectrumTrace
     actual_frequency_hz: float
 

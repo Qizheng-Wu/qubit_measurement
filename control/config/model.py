@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import ClassVar, Literal, Mapping, TypeVar
+from typing import Any, ClassVar, Literal, Mapping, TypeVar
+
+from pydantic import Field
 
 from control.core.exceptions import ConfigurationError
+from control.core.model import FrozenModel
 
 
 def _positive(value, name: str) -> float:
@@ -34,14 +36,13 @@ def _integer(value, minimum: int, name: str) -> int:
     return value
 
 
-@dataclass(frozen=True, slots=True)
-class VisaConnectionConfig:
+class VisaConnectionConfig(FrozenModel):
     address: str
     transport_timeout_s: float = 10.0
     read_termination: str | None = "\n"
     write_termination: str | None = "\n"
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         if not isinstance(self.address, str) or not self.address.strip():
             raise ConfigurationError("VISA address must be a non-empty string")
         object.__setattr__(
@@ -55,33 +56,29 @@ class VisaConnectionConfig:
                 raise ConfigurationError(f"{name} must be a string or null")
 
 
-@dataclass(frozen=True, slots=True)
-class VnaDeviceConfig:
+class VnaDeviceConfig(FrozenModel):
     connection: VisaConnectionConfig
     type: ClassVar[Literal["vna"]] = "vna"
 
 
-@dataclass(frozen=True, slots=True)
-class SpectrumAnalyzerDeviceConfig:
+class SpectrumAnalyzerDeviceConfig(FrozenModel):
     connection: VisaConnectionConfig
     type: ClassVar[Literal["spectrum_analyzer"]] = "spectrum_analyzer"
 
 
-@dataclass(frozen=True, slots=True)
-class MmcsDacBoardConfig:
+class MmcsDacBoardConfig(FrozenModel):
     sample_rate_hz: float
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         object.__setattr__(self, "sample_rate_hz", _positive(self.sample_rate_hz, "sample_rate_hz"))
 
 
-@dataclass(frozen=True, slots=True)
-class MmcsDeviceConfig:
+class MmcsDeviceConfig(FrozenModel):
     boxes: Mapping[str, str]
     dac_boards: Mapping[str, MmcsDacBoardConfig]
     type: ClassVar[Literal["mmcs"]] = "mmcs"
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         boxes = dict(self.boxes)
         boards = dict(self.dac_boards)
         if not boxes:
@@ -111,50 +108,46 @@ class MmcsDeviceConfig:
             ) from exc
 
 
-@dataclass(frozen=True, slots=True)
-class VnaSweepDefaults:
+class VnaSweepDefaults(FrozenModel):
     points: int = 1001
     bandwidth_hz: float = 1e3
     averages: int = 1
     acquisition_timeout_s: float = 30.0
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         object.__setattr__(self, "points", _integer(self.points, 2, "points"))
         object.__setattr__(self, "bandwidth_hz", _positive(self.bandwidth_hz, "bandwidth_hz"))
         object.__setattr__(self, "averages", _integer(self.averages, 1, "averages"))
         object.__setattr__(self, "acquisition_timeout_s", _positive(self.acquisition_timeout_s, "acquisition_timeout_s"))
 
 
-@dataclass(frozen=True, slots=True)
-class SpectrumSweepDefaults:
+class SpectrumSweepDefaults(FrozenModel):
     points: int = 501
     rbw_span_ratio: float = 0.01
     input_attenuation_db: float = 20.0
     acquisition_timeout_s: float = 30.0
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         object.__setattr__(self, "points", _integer(self.points, 2, "points"))
         object.__setattr__(self, "rbw_span_ratio", _positive(self.rbw_span_ratio, "rbw_span_ratio"))
         object.__setattr__(self, "input_attenuation_db", _non_negative(self.input_attenuation_db, "input_attenuation_db"))
         object.__setattr__(self, "acquisition_timeout_s", _positive(self.acquisition_timeout_s, "acquisition_timeout_s"))
 
 
-@dataclass(frozen=True, slots=True)
-class MmcsExecutionDefaults:
+class MmcsExecutionDefaults(FrozenModel):
     cleanup_timeout_s: float = 5.0
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         object.__setattr__(self, "cleanup_timeout_s", _positive(self.cleanup_timeout_s, "cleanup_timeout_s"))
 
 
-@dataclass(frozen=True, slots=True)
-class MmcsAwgDefaults:
+class MmcsAwgDefaults(FrozenModel):
     minimum_waveform_samples: int = 800
     period_ns: int = 1_000_000
     start_trigger_ns: int = 40
     safety_margin_s: float = 5.0
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         minimum = _integer(self.minimum_waveform_samples, 8, "minimum_waveform_samples")
         period = _integer(self.period_ns, 4, "period_ns")
         start = _integer(self.start_trigger_ns, 4, "start_trigger_ns")
@@ -168,25 +161,23 @@ class MmcsAwgDefaults:
         object.__setattr__(self, "safety_margin_s", _positive(self.safety_margin_s, "safety_margin_s"))
 
 
-@dataclass(frozen=True, slots=True)
-class ControlDefaults:
-    vna_sweep: VnaSweepDefaults = field(default_factory=VnaSweepDefaults)
-    spectrum_sweep: SpectrumSweepDefaults = field(default_factory=SpectrumSweepDefaults)
-    mmcs_execution: MmcsExecutionDefaults = field(default_factory=MmcsExecutionDefaults)
-    mmcs_awg: MmcsAwgDefaults = field(default_factory=MmcsAwgDefaults)
+class ControlDefaults(FrozenModel):
+    vna_sweep: VnaSweepDefaults = Field(default_factory=VnaSweepDefaults)
+    spectrum_sweep: SpectrumSweepDefaults = Field(default_factory=SpectrumSweepDefaults)
+    mmcs_execution: MmcsExecutionDefaults = Field(default_factory=MmcsExecutionDefaults)
+    mmcs_awg: MmcsAwgDefaults = Field(default_factory=MmcsAwgDefaults)
 
 
 DeviceConfig = VnaDeviceConfig | SpectrumAnalyzerDeviceConfig | MmcsDeviceConfig
 DeviceConfigT = TypeVar("DeviceConfigT", bound=DeviceConfig)
 
 
-@dataclass(frozen=True, slots=True)
-class ControlConfig:
+class ControlConfig(FrozenModel):
     schema_version: int
     instruments: Mapping[str, DeviceConfig]
-    defaults: ControlDefaults = field(default_factory=ControlDefaults)
+    defaults: ControlDefaults = Field(default_factory=ControlDefaults)
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         if self.schema_version == 1:
             raise ConfigurationError("schema_version 1 is no longer supported; migrate to schema_version 2")
         if isinstance(self.schema_version, bool) or self.schema_version != 2:

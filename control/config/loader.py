@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
+
 from control.core.exceptions import ConfigurationError
 
 from .model import (
@@ -49,7 +51,7 @@ def _required(table: Mapping[str, Any], field: str, path: str) -> Any:
 def _construct(factory, values: Mapping[str, Any], path: str):
     try:
         return factory(**dict(values))
-    except (ConfigurationError, TypeError) as exc:
+    except (ConfigurationError, PydanticValidationError, TypeError) as exc:
         raise ConfigurationError(f"{path}: {exc}") from exc
 
 

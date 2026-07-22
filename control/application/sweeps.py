@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import numpy as np
 
 from control.config import SpectrumSweepDefaults, VnaSweepDefaults
 from control.core.exceptions import ValidationError
+from control.core.model import FrozenModel
 from control.domain.sweep import SpectrumSweepConfig, VnaSweepConfig
 
 
@@ -16,23 +16,20 @@ def _positive_timeout(value: float) -> float:
     return float(value)
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class VnaSweepRequest:
+class VnaSweepRequest(FrozenModel):
     start_hz: float
     stop_hz: float
     power_dbm: float
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class VnaSweepEngineeringOverrides:
+class VnaSweepEngineeringOverrides(FrozenModel):
     points: int | None = None
     bandwidth_hz: float | None = None
     averages: int | None = None
     acquisition_timeout_s: float | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ResolvedVnaSweep:
+class ResolvedVnaSweep(FrozenModel):
     config: VnaSweepConfig
     acquisition_timeout_s: float
 
@@ -55,22 +52,19 @@ def resolve_vna_sweep(
     return ResolvedVnaSweep(config, _positive_timeout(timeout))
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SpectrumSweepRequest:
+class SpectrumSweepRequest(FrozenModel):
     start_hz: float
     stop_hz: float
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SpectrumSweepEngineeringOverrides:
+class SpectrumSweepEngineeringOverrides(FrozenModel):
     points: int | None = None
     resolution_bandwidth_hz: float | None = None
     input_attenuation_db: float | None = None
     acquisition_timeout_s: float | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ResolvedSpectrumSweep:
+class ResolvedSpectrumSweep(FrozenModel):
     config: SpectrumSweepConfig
     acquisition_timeout_s: float
 

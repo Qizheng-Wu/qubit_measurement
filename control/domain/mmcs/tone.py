@@ -3,24 +3,24 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
 from control.core.exceptions import ValidationError
+from control.core.model import FrozenModel
 
 from .model import DacWaveform
 
 
-@dataclass(frozen=True, slots=True)
-class SingleToneSpec:
+class SingleToneSpec(FrozenModel):
     sample_rate_hz: float
     frequency_hz: float
     amplitude: float
     phase_rad: float
     minimum_samples: int
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         numeric = (self.sample_rate_hz, self.frequency_hz, self.amplitude, self.phase_rad)
         if not np.isfinite(numeric).all():
             raise ValidationError("Single-tone parameters must be finite")
@@ -38,8 +38,7 @@ class SingleToneSpec:
             raise ValidationError("minimum_samples must be an integer >= 8")
 
 
-@dataclass(frozen=True, slots=True)
-class GeneratedSingleTone:
+class GeneratedSingleTone(FrozenModel):
     spec: SingleToneSpec
     waveform: DacWaveform
     actual_frequency_hz: float

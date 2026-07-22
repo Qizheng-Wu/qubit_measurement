@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 import numpy as np
 
 from control.core.exceptions import AcquisitionError, ValidationError
+from control.core.model import FrozenModel
 from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
 from control.driver.vna import VnaDriver, VnaSweepMode
 
@@ -25,8 +26,7 @@ def _validate_common(start_hz: float, stop_hz: float, points: int, bandwidth_hz:
         raise ValidationError("Sweep bandwidth must be positive")
 
 
-@dataclass(frozen=True, slots=True)
-class VnaSweepConfig:
+class VnaSweepConfig(FrozenModel):
     start_hz: float
     stop_hz: float
     points: int
@@ -34,7 +34,7 @@ class VnaSweepConfig:
     power_dbm: float
     averages: int
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         _validate_common(self.start_hz, self.stop_hz, self.points, self.bandwidth_hz)
         if not -85 <= self.power_dbm <= 10:
             raise ValidationError("power_dbm must be in [-85, 10]")
@@ -64,15 +64,14 @@ class VnaSweepConfig:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class SpectrumSweepConfig:
+class SpectrumSweepConfig(FrozenModel):
     start_hz: float
     stop_hz: float
     points: int
     resolution_bandwidth_hz: float
     input_attenuation_db: float
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         _validate_common(
             self.start_hz, self.stop_hz, self.points, self.resolution_bandwidth_hz
         )

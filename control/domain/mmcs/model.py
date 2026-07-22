@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from enum import Enum, IntEnum
+from typing import Any
 
 import numpy as np
+from pydantic import field_validator
+
+from control.core.model import FrozenModel
 
 
 def _readonly_float_array(values) -> np.ndarray:
@@ -34,28 +37,26 @@ class TriggerCommand(IntEnum):
     FEEDBACK = 12
 
 
-@dataclass(frozen=True, slots=True)
-class DacWaveform:
+class DacWaveform(FrozenModel):
     samples: np.ndarray
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "samples", _readonly_float_array(self.samples))
+    @field_validator("samples", mode="before")
+    @classmethod
+    def make_samples_readonly(cls, value: Any) -> np.ndarray:
+        return _readonly_float_array(value)
 
 
-@dataclass(frozen=True, slots=True)
-class PlaylistEntry:
+class PlaylistEntry(FrozenModel):
     waveform_index: int
     trigger: TriggerCommand
 
 
-@dataclass(frozen=True, slots=True)
-class TriggerEvent:
+class TriggerEvent(FrozenModel):
     time_ns: int
     command: TriggerCommand
 
 
-@dataclass(frozen=True, slots=True)
-class DacProgram:
+class DacProgram(FrozenModel):
     board_id: str
     channel: DacChannel
     waveforms: tuple[DacWaveform, ...]
@@ -63,46 +64,46 @@ class DacProgram:
     play_mode: DacPlayMode
     triggers: tuple[TriggerEvent, ...]
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "waveforms", tuple(self.waveforms))
-        object.__setattr__(self, "playlist", tuple(self.playlist))
-        object.__setattr__(self, "triggers", tuple(self.triggers))
+    @field_validator("waveforms", "playlist", "triggers", mode="before")
+    @classmethod
+    def freeze_sequences(cls, value: Any) -> tuple[Any, ...]:
+        return tuple(value)
 
 
-@dataclass(frozen=True, slots=True)
-class DemodulationWeights:
+class DemodulationWeights(FrozenModel):
     channel: int
     i: np.ndarray
     q: np.ndarray
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "i", _readonly_float_array(self.i))
-        object.__setattr__(self, "q", _readonly_float_array(self.q))
+    @field_validator("i", "q", mode="before")
+    @classmethod
+    def make_weights_readonly(cls, value: Any) -> np.ndarray:
+        return _readonly_float_array(value)
 
 
-@dataclass(frozen=True, slots=True)
-class AdcProgram:
+class AdcProgram(FrozenModel):
     board_id: str
     sample_length: int
     demodulations: tuple[DemodulationWeights, ...]
     triggers: tuple[TriggerEvent, ...]
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "demodulations", tuple(self.demodulations))
-        object.__setattr__(self, "triggers", tuple(self.triggers))
+    @field_validator("demodulations", "triggers", mode="before")
+    @classmethod
+    def freeze_sequences(cls, value: Any) -> tuple[Any, ...]:
+        return tuple(value)
 
 
-@dataclass(frozen=True, slots=True)
-class MmcsProgram:
+class MmcsProgram(FrozenModel):
     master_box: str
     period_ns: int
     repetitions: int
     dac_programs: tuple[DacProgram, ...] = ()
     adc_programs: tuple[AdcProgram, ...] = ()
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "dac_programs", tuple(self.dac_programs))
-        object.__setattr__(self, "adc_programs", tuple(self.adc_programs))
+    @field_validator("dac_programs", "adc_programs", mode="before")
+    @classmethod
+    def freeze_sequences(cls, value: Any) -> tuple[Any, ...]:
+        return tuple(value)
 
     def fingerprint(self) -> str:
         digest = hashlib.sha256()
@@ -125,15 +126,13 @@ class MmcsProgram:
         return digest.hexdigest()
 
 
-@dataclass(frozen=True, slots=True)
-class PreparedMmcsProgram:
+class PreparedMmcsProgram(FrozenModel):
     program: MmcsProgram
     fingerprint: str
     connection_generation: int
 
 
-@dataclass(frozen=True, slots=True)
-class RunningMmcsProgram:
+class RunningMmcsProgram(FrozenModel):
     """A prepared program that has been started by an executor."""
 
     prepared: PreparedMmcsProgram
