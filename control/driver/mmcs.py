@@ -14,8 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 class MmcsHardwareDriver:
-    def __init__(self, transport: MmcsVendorTransport) -> None:
+    def __init__(self, transport: MmcsVendorTransport, *, shutdown_timeout_s: float) -> None:
+        if shutdown_timeout_s <= 0:
+            raise ValueError("shutdown_timeout_s must be positive")
         self.transport = transport
+        self.shutdown_timeout_s = float(shutdown_timeout_s)
+        self._active_master_box: str | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -32,8 +36,10 @@ class MmcsHardwareDriver:
         """Return vendor FPGA version information when supported."""
         return self.transport.call("sys_get_fpga_version")
 
-    def stop_all(self, master_box: str = "box1", *, timeout_s: float = 5.0) -> None:
+    def stop_all(self, master_box: str, *, timeout_s: float) -> None:
         self.transport.call("sys_stop_all_borad", master_box_name=master_box, timeout=timeout_s)
+        if self._active_master_box == master_box:
+            self._active_master_box = None
 
     def clear_all_trigger_ram(self) -> None:
         self.transport.call("sys_clear_all_level2_trigger_ram")
@@ -45,6 +51,7 @@ class MmcsHardwareDriver:
 
     def start(self, master_box: str) -> None:
         self.transport.call("sys_run_level1_trigger", master_box_name=master_box)
+        self._active_master_box = master_box
 
     def wait(self, master_box: str, *, timeout_s: float) -> None:
         self.transport.call(
@@ -125,7 +132,8 @@ class MmcsHardwareDriver:
     def safe_shutdown(self) -> None:
         if not self.is_connected:
             return
-        self.stop_all()
+        if self._active_master_box is not None:
+            self.stop_all(self._active_master_box, timeout_s=self.shutdown_timeout_s)
         self.clear_all_trigger_ram()
 
     def close(self) -> None:

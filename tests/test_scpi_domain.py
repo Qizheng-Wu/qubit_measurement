@@ -97,7 +97,7 @@ def test_vna_protocol_error_aborts_and_restores():
     driver.connect()
     with pytest.raises(ProtocolError):
         VnaController(driver).acquire(
-            VnaSweepConfig(1, 2, 2, 100, -20), timeout_s=1
+            VnaSweepConfig(1, 2, 2, 100, -20, 1), timeout_s=1
         )
     assert ("write", ":ABORT") in transport.commands
     assert transport.commands[-1] == ("write", "OUTP 1")
@@ -122,10 +122,10 @@ def test_spectrum_analyzer_acquire():
 @pytest.mark.parametrize(
     "factory",
     [
-        lambda: VnaSweepConfig(2, 1, 2, 100, -20),
-        lambda: VnaSweepConfig(1, 2, 1, 100, -20),
-        lambda: VnaSweepConfig(1, 2, 2, 100, 20),
-        lambda: SpectrumSweepConfig(1, 2, 2, 0),
+        lambda: VnaSweepConfig(2, 1, 2, 100, -20, 1),
+        lambda: VnaSweepConfig(1, 2, 1, 100, -20, 1),
+        lambda: VnaSweepConfig(1, 2, 2, 100, 20, 1),
+        lambda: SpectrumSweepConfig(1, 2, 2, 0, 0),
         lambda: SpectrumSweepConfig(1, 2, 2, 100, -1),
     ],
 )
@@ -143,7 +143,7 @@ def test_operation_timeout_propagates_and_restores_transport_timeout():
     driver = VnaDriver(transport)
     driver.connect()
     with pytest.raises(TransportTimeoutError):
-        VnaController(driver).acquire(VnaSweepConfig(1, 2, 2, 100, -20), timeout_s=2)
+        VnaController(driver).acquire(VnaSweepConfig(1, 2, 2, 100, -20, 1), timeout_s=2)
     assert transport.timeout_s == 10
 
 
@@ -156,4 +156,4 @@ def test_successful_vna_acquisition_reports_restore_failure():
     driver = VnaDriver(transport)
     driver.connect()
     with pytest.raises(AcquisitionError, match="failed to restore state"):
-        VnaController(driver).acquire(VnaSweepConfig(1, 2, 2, 100, -20), timeout_s=2)
+        VnaController(driver).acquire(VnaSweepConfig(1, 2, 2, 100, -20, 1), timeout_s=2)

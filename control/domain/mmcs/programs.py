@@ -28,8 +28,8 @@ def build_cyclic_dac_program(
     channel: DacChannel,
     master_box: str,
     run_duration_s: float,
-    period_ns: int = 1_000_000,
-    start_trigger_ns: int = 40,
+    period_ns: int,
+    start_trigger_ns: int,
 ) -> MmcsProgram:
     """Build a finite sequence that cycles one waveform during each period."""
 
@@ -58,7 +58,7 @@ def build_cyclic_dac_program(
                 board_id=board_id,
                 channel=channel,
                 waveforms=(waveform,),
-                playlist=(PlaylistEntry(0),),
+                playlist=(PlaylistEntry(0, TriggerCommand.START),),
                 play_mode=DacPlayMode.CYCLE,
                 triggers=(
                     TriggerEvent(start_trigger_ns, TriggerCommand.START),

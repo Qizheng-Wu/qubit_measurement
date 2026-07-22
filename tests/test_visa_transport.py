@@ -49,6 +49,8 @@ def test_visa_transport_lifecycle_and_queries():
     transport = VisaTransport(
         "TCPIP::example",
         timeout_s=2.5,
+        read_termination="\n",
+        write_termination="\n",
         resource_manager_factory=lambda: manager,
     )
 
@@ -76,6 +78,9 @@ def test_visa_timeout_is_translated():
     resource = FakeResource()
     transport = VisaTransport(
         "TCPIP::example",
+        timeout_s=10,
+        read_termination="\n",
+        write_termination="\n",
         resource_manager_factory=lambda: FakeResourceManager(resource),
     )
     transport.open()
@@ -88,6 +93,9 @@ def test_numeric_protocol_error():
     resource.query = lambda command: "not-a-number"
     transport = VisaTransport(
         "TCPIP::example",
+        timeout_s=10,
+        read_termination="\n",
+        write_termination="\n",
         resource_manager_factory=lambda: FakeResourceManager(resource),
     )
     transport.open()

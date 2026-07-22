@@ -15,7 +15,7 @@ from .validator import validate_program
 
 
 class MmcsExecutor:
-    def __init__(self, driver: MmcsHardwareDriver, *, cleanup_timeout_s: float = 5.0) -> None:
+    def __init__(self, driver: MmcsHardwareDriver, *, cleanup_timeout_s: float) -> None:
         if cleanup_timeout_s <= 0:
             raise ValidationError("cleanup_timeout_s must be positive")
         self.driver = driver

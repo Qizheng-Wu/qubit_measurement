@@ -1,23 +1,45 @@
-schema_version = 1
+schema_version = 2
 
 [instruments.readout_vna]
 type = "vna"
 address = "USB0::0x2A8D::0x5A01::MY47100891::0::INSTR"
-timeout_s = 10.0
+transport_timeout_s = 10.0
 read_termination = "\n"
 write_termination = "\n"
 
 [instruments.spectrum]
 type = "spectrum_analyzer"
 address = "TCPIP0::192.168.4.5::hislip0::INSTR"
-timeout_s = 30.0
+transport_timeout_s = 30.0
 read_termination = "\n"
 write_termination = "\n"
 
 [instruments.mmcs]
 type = "mmcs"
-master_box = "box1"
-cleanup_timeout_s = 5.0
 
 [instruments.mmcs.boxes]
 box1 = "192.168.4.8"
+
+[instruments.mmcs.dac_boards.da_box1pcie1ch12]
+sample_rate_hz = 2e9
+
+[defaults.spectrum_sweep]
+points = 501
+rbw_span_ratio = 0.01
+input_attenuation_db = 20.0
+acquisition_timeout_s = 30.0
+
+[defaults.mmcs_execution]
+cleanup_timeout_s = 5.0
+
+[defaults.mmcs_awg]
+minimum_waveform_samples = 800
+period_ns = 1_000_000
+start_trigger_ns = 40
+safety_margin_s = 5.0
+
+[defaults.vna_sweep]
+points = 1001
+bandwidth_hz = 1e3
+averages = 1
+acquisition_timeout_s = 30.0

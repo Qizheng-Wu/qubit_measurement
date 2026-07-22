@@ -24,7 +24,7 @@ class InstrumentFactory:
         connection = config.connection
         return VisaTransport(
             connection.address,
-            timeout_s=connection.timeout_s,
+            timeout_s=connection.transport_timeout_s,
             read_termination=connection.read_termination,
             write_termination=connection.write_termination,
         )
@@ -39,4 +39,7 @@ class InstrumentFactory:
 
     def create_mmcs(self, name: str) -> MmcsHardwareDriver:
         config = self.config.require(name, MmcsDeviceConfig)
-        return MmcsHardwareDriver(MmcsVendorTransport(config.boxes))
+        return MmcsHardwareDriver(
+            MmcsVendorTransport(config.boxes),
+            shutdown_timeout_s=self.config.defaults.mmcs_execution.cleanup_timeout_s,
+        )

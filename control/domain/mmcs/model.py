@@ -45,13 +45,13 @@ class DacWaveform:
 @dataclass(frozen=True, slots=True)
 class PlaylistEntry:
     waveform_index: int
-    trigger: TriggerCommand = TriggerCommand.START
+    trigger: TriggerCommand
 
 
 @dataclass(frozen=True, slots=True)
 class TriggerEvent:
     time_ns: int
-    command: TriggerCommand = TriggerCommand.START
+    command: TriggerCommand
 
 
 @dataclass(frozen=True, slots=True)

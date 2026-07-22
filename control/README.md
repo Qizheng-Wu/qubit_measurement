@@ -1,53 +1,47 @@
-# Instrument connection configuration
+# Instrument control configuration
 
 Copy `config/instruments.example.toml` to `config/instruments.local.toml` and
-replace the example VISA resources and MMCS IP addresses. Local TOML files are
-ignored by Git.
+replace the example addresses. Schema version 2 separates three concerns:
 
-Only static connection information belongs in this file. Sweep ranges, source
-power, MMCS waveforms, trigger times, and repetitions remain explicit domain
-arguments so each acquisition records its complete runtime configuration.
+- `instruments`: shared connection inventory and hardware facts;
+- `defaults`: shared engineering-policy defaults;
+- experiment specs: physical intent and the hardware path selected for one run.
+
+MMCS DAC sample rates are hardware facts and must be registered per board:
+
+```toml
+[instruments.mmcs.dac_boards.da_box1pcie1ch12]
+sample_rate_hz = 2e9
+```
+
+An experiment selects this board but cannot supply or override its sample
+rate. Unknown boards fail during resolution, before hardware is connected.
+
+## Configured sweeps
+
+Low-level domain configs contain complete execution facts and have no physical
+or engineering defaults. Applications can resolve a physical request using
+the shared defaults and optional engineering overrides:
 
 ```python
-from control import InstrumentFactory, VnaController, VnaSweepConfig
+from control.application import VnaSweepRequest, resolve_vna_sweep
 from control.config import load_control_config
 
 config = load_control_config("config/instruments.local.toml")
-factory = InstrumentFactory(config)
-
-with factory.create_vna("readout_vna") as driver:
-    trace = VnaController(driver).acquire(
-        VnaSweepConfig(
-            start_hz=4e9,
-            stop_hz=8e9,
-            points=1001,
-            bandwidth_hz=1e3,
-            power_dbm=-30,
-        ),
-        timeout_s=30,
-    )
-```
-
-Applications that support multiple deployments may select the file path with
-an environment variable, but the library loader deliberately requires an
-explicit path:
-
-```python
-import os
-
-path = os.getenv("CONTROL_CONFIG", "config/instruments.local.toml")
-config = load_control_config(path)
+resolved = resolve_vna_sweep(
+    VnaSweepRequest(start_hz=4e9, stop_hz=8e9, power_dbm=-30),
+    config.defaults.vna_sweep,
+)
 ```
 
 ## MMCS AWG spectrum smoke experiment
 
-`experiment/mmcs_awg_spectrum.py` generates a periodic single tone on one MMCS
-DAC and acquires it with the configured spectrum analyzer.  Before running it,
-edit the hardware identifiers and set `DAC_SAMPLE_RATE_HZ` to the actual DAC
-sample rate.  The script remains a dry run until `RUN_HARDWARE` is explicitly
-set to `True`.
+`experiment/mmcs_awg_spectrum.py` declares one frozen experiment spec containing
+the tone, observation span, and selected MMCS/spectrum-analyzer path. Waveform
+alignment, trigger period, attenuation, RBW ratio, and timeouts come from the
+schema-v2 shared defaults unless an application caller supplies engineering
+overrides.
 
-Connect the DAC through suitable attenuation and verify the spectrum analyzer
-input limit before enabling hardware access.  The script starts MMCS without a
-blocking wait, acquires the spectrum, and always requests an MMCS stop before
-displaying the trace.
+The script resolves and prints every effective value in dry-run mode. Verify
+the configured board sample rate, cabling, attenuation, and input limits before
+setting `RUN_HARDWARE = True`.

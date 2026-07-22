@@ -17,8 +17,8 @@ class SingleToneSpec:
     sample_rate_hz: float
     frequency_hz: float
     amplitude: float
-    phase_rad: float = 0.0
-    minimum_samples: int = 800
+    phase_rad: float
+    minimum_samples: int
 
     def __post_init__(self) -> None:
         numeric = (self.sample_rate_hz, self.frequency_hz, self.amplitude, self.phase_rad)

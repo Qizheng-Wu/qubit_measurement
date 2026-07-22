@@ -32,7 +32,7 @@ class VnaSweepConfig:
     points: int
     bandwidth_hz: float
     power_dbm: float
-    averages: int = 1
+    averages: int
 
     def __post_init__(self) -> None:
         _validate_common(self.start_hz, self.stop_hz, self.points, self.bandwidth_hz)
@@ -50,7 +50,7 @@ class VnaSweepConfig:
         points: int,
         bandwidth_hz: float,
         power_dbm: float,
-        averages: int = 1,
+        averages: int,
     ) -> "VnaSweepConfig":
         if span_hz <= 0:
             raise ValidationError("span_hz must be positive")
@@ -70,7 +70,7 @@ class SpectrumSweepConfig:
     stop_hz: float
     points: int
     resolution_bandwidth_hz: float
-    input_attenuation_db: float = 0.0
+    input_attenuation_db: float
 
     def __post_init__(self) -> None:
         _validate_common(
@@ -87,7 +87,7 @@ class SpectrumSweepConfig:
         span_hz: float,
         points: int,
         resolution_bandwidth_hz: float,
-        input_attenuation_db: float = 0.0,
+        input_attenuation_db: float,
     ) -> "SpectrumSweepConfig":
         if span_hz <= 0:
             raise ValidationError("span_hz must be positive")

@@ -23,9 +23,9 @@ class VisaTransport:
         self,
         resource_name: str,
         *,
-        timeout_s: float = 10.0,
-        read_termination: str | None = "\n",
-        write_termination: str | None = "\n",
+        timeout_s: float,
+        read_termination: str | None,
+        write_termination: str | None,
         resource_manager_factory: Callable[[], Any] | None = None,
     ) -> None:
         if timeout_s <= 0:
