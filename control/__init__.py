@@ -1,0 +1,1 @@
+"""Laboratory control package."""
