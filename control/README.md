@@ -38,11 +38,9 @@ resolved = resolve_vna_sweep(
 
 ## MMCS AWG spectrum smoke experiment
 
-`experiment/mmcs_awg_spectrum.py` declares one frozen experiment spec containing
-the tone, observation span, and selected MMCS/spectrum-analyzer path. Waveform
-alignment, trigger period, attenuation, RBW ratio, and timeouts come from the
-schema-v2 shared defaults unless the optional fields on the experiment spec
-override them for one run.
+`experiment/mmcs_awg_spectrum.py` contains the experiment parameters and expands
+the shared defaults into a tone, MMCS program, and spectrum sweep. The
+application layer only coordinates MMCS start/stop with the analyzer acquisition.
 
 The script resolves and prints every effective value in dry-run mode. Verify
 the configured board sample rate, cabling, attenuation, and input limits before

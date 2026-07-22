@@ -16,8 +16,11 @@ from control.domain.mmcs import (
     DemodulationWeights,
     MmcsProgram,
     PlaylistEntry,
+    SingleToneSpec,
     TriggerEvent,
     TriggerCommand,
+    build_cyclic_dac_program,
+    generate_single_tone,
 )
 from control.domain.sweep import SpectrumSweepConfig, VnaSweepConfig
 from control.driver.mmcs import MmcsHardwareDriver
@@ -26,13 +29,13 @@ from control.driver.vna import VnaDriver
 from control.transport.mmcs_vendor import MmcsVendorTransport
 from control.transport.visa import VisaTransport
 from control.application import (
-    MmcsAwgSpectrumExperiment,
-    MmcsAwgSpectrumSpec,
     MmcsExecutor,
     SpectrumAnalyzerController,
     VnaController,
+    acquire_spectrum_while_mmcs_runs,
 )
-from control.config import load_control_config
+from control.config import MmcsDeviceConfig, load_control_config
+from control.factory import InstrumentFactory
 
 
 pytestmark = [
@@ -121,17 +124,47 @@ def test_mmcs_awg_visible_on_spectrum_analyzer():
             "LAB_CONTROL_CONFIG, LAB_MMCS_NAME, LAB_SA_NAME, LAB_MMCS_MASTER_BOX, "
             "and LAB_MMCS_DAC_ID are required"
         )
-    result = MmcsAwgSpectrumExperiment(load_control_config(config_path)).acquire(
-        MmcsAwgSpectrumSpec(
-            mmcs_name=mmcs_name,
-            spectrum_analyzer_name=spectrum_name,
-            master_box=master_box,
-            dac_board_id=dac_id,
-            dac_channel=DacChannel.I,
-            tone_frequency_hz=20e6,
-            tone_amplitude=0.02,
-            tone_phase_rad=0.0,
-            spectrum_span_hz=2e6,
+    config = load_control_config(config_path)
+    board = config.require(mmcs_name, MmcsDeviceConfig).require_dac_board(dac_id)
+    spectrum_defaults = config.defaults.spectrum_sweep
+    awg_defaults = config.defaults.mmcs_awg
+    tone = generate_single_tone(
+        SingleToneSpec(
+            sample_rate_hz=board.sample_rate_hz,
+            frequency_hz=20e6,
+            amplitude=0.02,
+            phase_rad=0.0,
+            minimum_samples=awg_defaults.minimum_waveform_samples,
         )
     )
-    assert np.all(np.isfinite(result.trace.power_dbm))
+    timeout = spectrum_defaults.acquisition_timeout_s
+    program = build_cyclic_dac_program(
+        tone.waveform,
+        board_id=dac_id,
+        channel=DacChannel.I,
+        master_box=master_box,
+        run_duration_s=timeout + awg_defaults.safety_margin_s,
+        period_ns=awg_defaults.period_ns,
+        start_trigger_ns=awg_defaults.start_trigger_ns,
+    )
+    spectrum_config = SpectrumSweepConfig.from_center_span(
+        center_hz=tone.actual_frequency_hz,
+        span_hz=2e6,
+        points=spectrum_defaults.points,
+        resolution_bandwidth_hz=2e6 * spectrum_defaults.rbw_span_ratio,
+        input_attenuation_db=spectrum_defaults.input_attenuation_db,
+    )
+    factory = InstrumentFactory(config)
+    with factory.create_mmcs(mmcs_name) as mmcs_driver:
+        with factory.create_spectrum_analyzer(spectrum_name) as analyzer_driver:
+            trace = acquire_spectrum_while_mmcs_runs(
+                MmcsExecutor(
+                    mmcs_driver,
+                    cleanup_timeout_s=config.defaults.mmcs_execution.cleanup_timeout_s,
+                ),
+                SpectrumAnalyzerController(analyzer_driver),
+                program=program,
+                spectrum_config=spectrum_config,
+                spectrum_timeout_s=timeout,
+            )
+    assert np.all(np.isfinite(trace.power_dbm))
