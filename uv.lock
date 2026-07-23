@@ -1533,7 +1533,7 @@ wheels = [
 [[package]]
 name = "mmcs-driver"
 version = "0.4.2"
-source = { editable = "legacy/vendor/MMCSDriver" }
+source = { editable = "MMCSDriver" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
@@ -2688,7 +2688,7 @@ requires-dist = [
     { name = "labcodes" },
     { name = "logqbit" },
     { name = "matplotlib" },
-    { name = "mmcs-driver", editable = "legacy/vendor/MMCSDriver" },
+    { name = "mmcs-driver", editable = "MMCSDriver" },
     { name = "numba" },
     { name = "numpy" },
     { name = "pandas" },

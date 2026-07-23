@@ -41,7 +41,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-mmcs-driver = { path = "legacy/vendor/MMCSDriver", editable = true }
+mmcs-driver = { path = "MMCSDriver", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
