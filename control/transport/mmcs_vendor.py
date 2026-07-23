@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 def _default_backend_factory(boxes: Mapping[str, str]) -> Any:
-    from MMCSDriver.mmcs_driver import MmcsDriver
+    # The vendored distribution is named ``mmcs_driver`` and installs that
+    # package at the top level.  Importing it through ``MMCSDriver`` only works
+    # accidentally when legacy/vendor itself has been added to sys.path.
+    from mmcs_driver import MmcsDriver
 
     return MmcsDriver(box_ip_dict=dict(boxes))
 

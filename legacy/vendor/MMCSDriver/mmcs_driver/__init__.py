@@ -1,4 +1,4 @@
-from MMCSDriver.mmcs_driver.MmcsDriver_mod import MmcsDriver_cls as MmcsDriver
+from .MmcsDriver_mod import MmcsDriver_cls as MmcsDriver
 
 
 TRIG_ON = 1

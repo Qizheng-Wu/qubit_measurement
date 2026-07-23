@@ -1,9 +1,9 @@
-from MMCSDriver.mmcs_driver.api.sdk_user import sdk_user
+from .api.sdk_user import sdk_user
 import numpy as np
 import math as math
-from MMCSDriver.mmcs_driver.Tools_mod import Tools
+from .Tools_mod import Tools
 from typing import Dict
-from MMCSDriver.mmcs_driver.api.udp_base import udp_interface
+from .api.udp_base import udp_interface
 
 
 '''
