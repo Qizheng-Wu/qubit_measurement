@@ -1,72 +1,107 @@
+from contextlib import contextmanager
+from types import SimpleNamespace
+
 import pytest
 
-from control.application import acquire_spectrum_while_mmcs_runs
 from control.core.exceptions import AcquisitionError
+from experiment.mmcs_awg_spectrum import run_experiment
 
 
-class FakeExecutor:
-    def __init__(self, events, *, fail_stop=False):
+class FakeMmcsService:
+    def __init__(self, events):
         self.events = events
-        self.fail_stop = fail_stop
 
-    def prepare(self, program):
-        self.events.append("prepare")
+    @contextmanager
+    def connected(self):
+        self.events.append("mmcs-connect")
+        try:
+            yield self
+        finally:
+            self.events.append("mmcs-disconnect")
 
-    def start(self):
-        self.events.append("start")
+    @contextmanager
+    def running(self, program):
+        self.events.append("mmcs-start")
+        try:
+            yield object()
+        finally:
+            self.events.append("mmcs-stop")
 
-    def stop(self):
-        self.events.append("stop")
-        if self.fail_stop:
-            raise RuntimeError("injected stop failure")
 
-
-class FakeAnalyzer:
-    def __init__(self, events, *, fail=False):
+class FakeSpectrumRun:
+    def __init__(self, events, *, fail):
         self.events = events
         self.fail = fail
 
-    def acquire(self, config, *, timeout_s):
-        self.events.append("acquire")
+    def result(self, *, timeout_s):
+        self.events.append("spectrum-result")
         if self.fail:
             raise AcquisitionError("injected acquisition failure")
         return "trace"
 
 
-def test_acquisition_occurs_between_start_and_stop():
-    events = []
-    trace = acquire_spectrum_while_mmcs_runs(
-        FakeExecutor(events),
-        FakeAnalyzer(events),
-        program=object(),
+class FakeSpectrumService:
+    def __init__(self, events, *, fail=False):
+        self.events = events
+        self.fail = fail
+
+    @contextmanager
+    def connected(self):
+        self.events.append("spectrum-connect")
+        try:
+            yield self
+        finally:
+            self.events.append("spectrum-disconnect")
+
+    @contextmanager
+    def running(self, config):
+        self.events.append("spectrum-start")
+        try:
+            yield FakeSpectrumRun(self.events, fail=self.fail)
+        finally:
+            self.events.append("spectrum-stop")
+
+
+def make_plan():
+    return SimpleNamespace(
+        mmcs_program=object(),
         spectrum_config=object(),
         spectrum_timeout_s=1,
     )
-    assert events == ["prepare", "start", "acquire", "stop"]
+
+
+def test_experiment_nests_instrument_lifecycles():
+    events = []
+    trace = run_experiment(
+        FakeMmcsService(events),
+        FakeSpectrumService(events),
+        make_plan(),
+    )
     assert trace == "trace"
+    assert events == [
+        "mmcs-connect",
+        "spectrum-connect",
+        "mmcs-start",
+        "spectrum-start",
+        "spectrum-result",
+        "spectrum-stop",
+        "mmcs-stop",
+        "spectrum-disconnect",
+        "mmcs-disconnect",
+    ]
 
 
-def test_acquisition_failure_still_stops():
+def test_spectrum_failure_still_stops_and_disconnects_everything():
     events = []
     with pytest.raises(AcquisitionError, match="injected acquisition"):
-        acquire_spectrum_while_mmcs_runs(
-            FakeExecutor(events),
-            FakeAnalyzer(events, fail=True),
-            program=object(),
-            spectrum_config=object(),
-            spectrum_timeout_s=1,
+        run_experiment(
+            FakeMmcsService(events),
+            FakeSpectrumService(events, fail=True),
+            make_plan(),
         )
-    assert events == ["prepare", "start", "acquire", "stop"]
-
-
-def test_stop_failure_is_reported():
-    events = []
-    with pytest.raises(RuntimeError, match="stop failure"):
-        acquire_spectrum_while_mmcs_runs(
-            FakeExecutor(events, fail_stop=True),
-            FakeAnalyzer(events),
-            program=object(),
-            spectrum_config=object(),
-            spectrum_timeout_s=1,
-        )
-    assert events == ["prepare", "start", "acquire", "stop"]
+    assert events[-4:] == [
+        "spectrum-stop",
+        "mmcs-stop",
+        "spectrum-disconnect",
+        "mmcs-disconnect",
+    ]

@@ -2,10 +2,10 @@ from inspect import signature
 
 import pytest
 
-from control.application import resolve_spectrum_sweep, resolve_vna_sweep
 from control.config import SpectrumSweepDefaults, VnaSweepDefaults
 from control.domain.mmcs import PlaylistEntry, SingleToneSpec, TriggerEvent
 from control.domain.sweep import SpectrumSweepConfig, VnaSweepConfig
+from control.services import resolve_spectrum_sweep, resolve_vna_sweep
 
 
 def test_vna_resolver_uses_defaults_and_selective_override():

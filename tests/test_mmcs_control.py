@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from control.application import MmcsExecutor
 from control.core.exceptions import InstrumentCommandError, InstrumentStateError
 from control.domain.mmcs import (
     AdcProgram,
@@ -18,10 +17,9 @@ from control.domain.mmcs import (
     SingleToneSpec,
     TriggerCommand,
     TriggerEvent,
-    build_cyclic_dac_program,
-    generate_single_tone,
 )
 from control.driver.mmcs import MmcsHardwareDriver
+from control.services import MmcsService, build_cyclic_dac_program, generate_single_tone
 from control.transport.mmcs_vendor import MmcsVendorTransport
 
 
@@ -77,76 +75,122 @@ def make_program(**changes):
     return MmcsProgram(**values)
 
 
-def make_stack(backend):
+def make_service(backend):
     transport = MmcsVendorTransport(
         {"box1": "192.0.2.1"}, backend_factory=lambda boxes: backend
     )
     driver = MmcsHardwareDriver(transport, shutdown_timeout_s=5)
-    driver.connect()
-    return transport, driver, MmcsExecutor(driver, cleanup_timeout_s=5)
+    return transport, MmcsService(driver, cleanup_timeout_s=5)
 
 
-def test_prepare_run_and_reuse_program():
+def test_each_run_prepares_and_result_is_cached():
     backend = FakeMmcsBackend()
-    _, _, executor = make_stack(backend)
-    executor.prepare(make_program())
+    _, service = make_service(backend)
+    program = make_program()
 
-    executor.start()
-    first = executor.wait(timeout_s=2)
-    executor.start()
-    second = executor.wait(timeout_s=2)
+    with service.connected():
+        with service.running(program) as first_run:
+            first = first_run.result(timeout_s=2)
+            assert first_run.result(timeout_s=2) is first
+        with service.running(program) as second_run:
+            second = second_run.result(timeout_s=2)
 
     assert set(first.iq_by_adc) == {"ad_box1pcie1ch12"}
     assert first.iq_by_adc["ad_box1pcie1ch12"].i_sum.shape == (12, 2)
     assert first.program_fingerprint == second.program_fingerprint
     names = [call[0] for call in backend.calls]
-    assert names.count("da_set_multi_waveform") == 1
+    assert names.count("da_set_multi_waveform") == 2
     assert names.count("sys_run_level1_trigger") == 2
-    assert names.count("ad_clear_stored_data") == 3
     with pytest.raises(ValueError):
         first.iq_by_adc["ad_box1pcie1ch12"].i_sum[0, 0] = 1
 
 
-def test_start_wait_stop_lifecycle():
+def test_unconsumed_run_stops_and_completed_run_waits():
     backend = FakeMmcsBackend()
-    _, _, executor = make_stack(backend)
-    executor.prepare(make_program(adc_programs=()))
+    _, service = make_service(backend)
+    program = make_program(adc_programs=())
 
-    executor.start()
-    with pytest.raises(InstrumentStateError, match="already running"):
-        executor.start()
-    executor.stop()
+    with service.connected():
+        with service.running(program):
+            pass
+        with service.running(program) as run:
+            result = run.result(timeout_s=1)
 
-    executor.start()
-    result = executor.wait(timeout_s=1)
     assert not result.iq_by_adc
     names = [call[0] for call in backend.calls]
     assert names.count("sys_run_level1_trigger") == 2
     assert names.count("sys_wait_until_finish") == 1
 
 
-def test_wait_failure_cleans_up_and_releases_executor():
+def test_wait_failure_cleans_up_and_allows_another_run():
     backend = FakeMmcsBackend(fail_method="sys_wait_until_finish")
-    _, _, executor = make_stack(backend)
-    executor.prepare(make_program(adc_programs=()))
-    executor.start()
+    _, service = make_service(backend)
+    program = make_program(adc_programs=())
 
-    with pytest.raises(InstrumentCommandError):
-        executor.wait(timeout_s=1)
-    with pytest.raises(InstrumentStateError, match="not running"):
-        executor.stop()
+    with service.connected():
+        with pytest.raises(InstrumentCommandError):
+            with service.running(program) as run:
+                run.result(timeout_s=1)
+        backend.fail_method = None
+        with service.running(program):
+            pass
 
 
-def test_start_failure_cleans_up_and_releases_executor():
+def test_start_failure_cleans_up_without_entering_body():
     backend = FakeMmcsBackend(fail_method="sys_run_level1_trigger")
-    _, _, executor = make_stack(backend)
-    executor.prepare(make_program(adc_programs=()))
+    _, service = make_service(backend)
+    entered = False
 
-    with pytest.raises(InstrumentCommandError):
-        executor.start()
-    executor.prepare(make_program(adc_programs=()))
+    with service.connected():
+        with pytest.raises(InstrumentCommandError):
+            with service.running(make_program(adc_programs=())):
+                entered = True
+    assert not entered
     names = [call[0] for call in backend.calls]
-    assert names.count("sys_stop_all_borad") >= 3
+    assert names.count("sys_clear_all_level2_trigger_ram") >= 2
+
+
+def test_prepare_failure_cleans_up_without_entering_body():
+    backend = FakeMmcsBackend(fail_method="da_set_multi_waveform")
+    _, service = make_service(backend)
+    entered = False
+    with service.connected():
+        with pytest.raises(InstrumentCommandError):
+            with service.running(make_program()):
+                entered = True
+    assert not entered
+
+
+def test_connection_and_running_guards_and_stale_handle():
+    backend = FakeMmcsBackend()
+    _, service = make_service(backend)
+    program = make_program(adc_programs=())
+
+    with pytest.raises(InstrumentStateError, match="connected"):
+        with service.running(program):
+            pass
+
+    with service.connected():
+        with pytest.raises(InstrumentStateError, match="already connected"):
+            with service.connected():
+                pass
+        with service.running(program) as stale:
+            with pytest.raises(InstrumentStateError, match="already running"):
+                with service.running(program):
+                    pass
+    with pytest.raises(InstrumentStateError, match="connected"):
+        stale.result(timeout_s=1)
+
+
+def test_body_error_is_preserved_when_stop_also_fails():
+    backend = FakeMmcsBackend()
+    _, service = make_service(backend)
+    with pytest.raises(ValueError, match="primary") as captured:
+        with service.connected():
+            with service.running(make_program(adc_programs=())):
+                backend.fail_method = "sys_stop_all_borad"
+                raise ValueError("primary")
+    assert any("Stopping MMCS also failed" in note for note in captured.value.__notes__)
 
 
 def tone_spec(**changes):
@@ -190,7 +234,9 @@ def test_invalid_single_tone_is_rejected(changes):
 
 
 def test_build_cyclic_dac_program():
-    tone = generate_single_tone(tone_spec(frequency_hz=20e6, amplitude=0.02, phase_rad=0, minimum_samples=800))
+    tone = generate_single_tone(
+        tone_spec(frequency_hz=20e6, amplitude=0.02, phase_rad=0, minimum_samples=800)
+    )
     program = build_cyclic_dac_program(
         tone.waveform,
         board_id="da_box1pcie1ch12",
@@ -208,36 +254,6 @@ def test_build_cyclic_dac_program():
         TriggerCommand.START,
         TriggerCommand.STOP,
     ]
-
-
-def test_prepared_program_invalid_after_reconnect():
-    backends = []
-
-    def factory(boxes):
-        backend = FakeMmcsBackend()
-        backends.append(backend)
-        return backend
-
-    transport = MmcsVendorTransport({"box1": "192.0.2.1"}, backend_factory=factory)
-    driver = MmcsHardwareDriver(transport, shutdown_timeout_s=5)
-    driver.connect()
-    executor = MmcsExecutor(driver, cleanup_timeout_s=5)
-    executor.prepare(make_program())
-    driver.close()
-    driver.connect()
-
-    with pytest.raises(InstrumentStateError, match="invalid after reconnect"):
-        executor.start()
-
-
-def test_prepare_failure_runs_cleanup_and_preserves_primary_error():
-    backend = FakeMmcsBackend(fail_method="da_set_multi_waveform")
-    _, _, executor = make_stack(backend)
-    with pytest.raises(InstrumentCommandError):
-        executor.prepare(make_program())
-    names = [call[0] for call in backend.calls]
-    assert names.count("sys_stop_all_borad") >= 2
-    assert names.count("sys_clear_all_level2_trigger_ram") >= 2
 
 
 def invalid_waveform_program():

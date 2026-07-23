@@ -24,8 +24,8 @@ defaults. Application resolvers accept physical parameters plus optional
 per-run overrides:
 
 ```python
-from control.application import resolve_vna_sweep
 from control.config import load_control_config
+from control.services import resolve_vna_sweep
 
 config = load_control_config("config/instruments.local.toml")
 resolved = resolve_vna_sweep(
@@ -38,9 +38,9 @@ resolved = resolve_vna_sweep(
 
 ## MMCS AWG spectrum smoke experiment
 
-`experiment/mmcs_awg_spectrum.py` contains the experiment parameters and expands
-the shared defaults into a tone, MMCS program, and spectrum sweep. The
-application layer only coordinates MMCS start/stop with the analyzer acquisition.
+`experiment/mmcs_awg_spectrum.py` contains the experiment parameters, expands
+the shared defaults into a tone, MMCS program, and spectrum sweep, and coordinates
+the connected/running service lifecycles.
 
 The script resolves and prints every effective value in dry-run mode. Verify
 the configured board sample rate, cabling, attenuation, and input limits before

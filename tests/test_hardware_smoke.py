@@ -19,8 +19,6 @@ from control.domain.mmcs import (
     SingleToneSpec,
     TriggerEvent,
     TriggerCommand,
-    build_cyclic_dac_program,
-    generate_single_tone,
 )
 from control.domain.sweep import SpectrumSweepConfig, VnaSweepConfig
 from control.driver.mmcs import MmcsHardwareDriver
@@ -28,14 +26,15 @@ from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
 from control.driver.vna import VnaDriver
 from control.transport.mmcs_vendor import MmcsVendorTransport
 from control.transport.visa import VisaTransport
-from control.application import (
-    MmcsExecutor,
-    SpectrumAnalyzerController,
-    VnaController,
-    acquire_spectrum_while_mmcs_runs,
-)
 from control.config import MmcsDeviceConfig, load_control_config
 from control.factory import InstrumentFactory
+from control.services import (
+    MmcsService,
+    SpectrumAnalyzerService,
+    VnaService,
+    build_cyclic_dac_program,
+    generate_single_tone,
+)
 
 
 pytestmark = [
@@ -51,14 +50,15 @@ def test_vna_low_power_short_sweep():
     resource = os.environ.get("LAB_VNA_RESOURCE")
     if not resource:
         pytest.skip("LAB_VNA_RESOURCE is not configured")
-    with VnaDriver(VisaTransport(resource, timeout_s=10, read_termination="\n", write_termination="\n")) as driver:
-        trace = VnaController(driver).acquire(
-            VnaSweepConfig(
+    service = VnaService(
+        VnaDriver(VisaTransport(resource, timeout_s=10, read_termination="\n", write_termination="\n"))
+    )
+    with service.connected():
+        with service.running(VnaSweepConfig(
                 start_hz=4e9, stop_hz=4.01e9, points=11,
                 bandwidth_hz=1e5, power_dbm=-60, averages=1,
-            ),
-            timeout_s=30,
-        )
+        )) as run:
+            trace = run.result(timeout_s=30)
     assert trace.s_parameter.shape == (11,)
 
 
@@ -66,14 +66,15 @@ def test_spectrum_analyzer_short_sweep():
     resource = os.environ.get("LAB_SA_RESOURCE")
     if not resource:
         pytest.skip("LAB_SA_RESOURCE is not configured")
-    with SpectrumAnalyzerDriver(VisaTransport(resource, timeout_s=10, read_termination="\n", write_termination="\n")) as driver:
-        trace = SpectrumAnalyzerController(driver).acquire(
-            SpectrumSweepConfig(
+    service = SpectrumAnalyzerService(
+        SpectrumAnalyzerDriver(VisaTransport(resource, timeout_s=10, read_termination="\n", write_termination="\n"))
+    )
+    with service.connected():
+        with service.running(SpectrumSweepConfig(
                 start_hz=4e9, stop_hz=4.01e9, points=11,
                 resolution_bandwidth_hz=1e5, input_attenuation_db=20,
-            ),
-            timeout_s=30,
-        )
+        )) as run:
+            trace = run.result(timeout_s=30)
     assert trace.power_dbm.shape == (11,)
 
 
@@ -108,8 +109,13 @@ def test_mmcs_zero_waveform_and_iq():
             ),
         ),
     )
-    with MmcsHardwareDriver(MmcsVendorTransport({"box1": ip}), shutdown_timeout_s=5) as driver:
-        result = MmcsExecutor(driver, cleanup_timeout_s=5).execute(program, timeout_s=10)
+    service = MmcsService(
+        MmcsHardwareDriver(MmcsVendorTransport({"box1": ip}), shutdown_timeout_s=5),
+        cleanup_timeout_s=5,
+    )
+    with service.connected():
+        with service.running(program) as run:
+            result = run.result(timeout_s=10)
     assert result.iq_by_adc[adc_id].i_average.shape[0] == 12
 
 
@@ -155,16 +161,10 @@ def test_mmcs_awg_visible_on_spectrum_analyzer():
         input_attenuation_db=spectrum_defaults.input_attenuation_db,
     )
     factory = InstrumentFactory(config)
-    with factory.create_mmcs(mmcs_name) as mmcs_driver:
-        with factory.create_spectrum_analyzer(spectrum_name) as analyzer_driver:
-            trace = acquire_spectrum_while_mmcs_runs(
-                MmcsExecutor(
-                    mmcs_driver,
-                    cleanup_timeout_s=config.defaults.mmcs_execution.cleanup_timeout_s,
-                ),
-                SpectrumAnalyzerController(analyzer_driver),
-                program=program,
-                spectrum_config=spectrum_config,
-                spectrum_timeout_s=timeout,
-            )
+    mmcs = factory.create_mmcs_service(mmcs_name)
+    spectrum = factory.create_spectrum_analyzer_service(spectrum_name)
+    with mmcs.connected(), spectrum.connected():
+        with mmcs.running(program):
+            with spectrum.running(spectrum_config) as run:
+                trace = run.result(timeout_s=timeout)
     assert np.all(np.isfinite(trace.power_dbm))

@@ -82,3 +82,13 @@ class SpectrumSweepConfig(FrozenModel):
             resolution_bandwidth_hz=resolution_bandwidth_hz,
             input_attenuation_db=input_attenuation_db,
         )
+
+
+class ResolvedVnaSweep(FrozenModel):
+    config: VnaSweepConfig
+    acquisition_timeout_s: PositiveFloat
+
+
+class ResolvedSpectrumSweep(FrozenModel):
+    config: SpectrumSweepConfig
+    acquisition_timeout_s: PositiveFloat

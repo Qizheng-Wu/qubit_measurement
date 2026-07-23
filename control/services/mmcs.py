@@ -1,8 +1,10 @@
-"""Upload and execute validated MMCS programs."""
+"""MMCS program loading and execution service."""
 
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
+from typing import Iterator
 
 import numpy as np
 
@@ -11,21 +13,39 @@ from control.domain.mmcs.model import MmcsProgram
 from control.domain.mmcs.result import MmcsIqResult, MmcsResult
 from control.driver.mmcs import MmcsHardwareDriver
 
+from .base import BaseInstrumentService
 
-class MmcsExecutor:
+
+class MmcsRun:
+    def __init__(self, service: "MmcsService", program: MmcsProgram) -> None:
+        self._service = service
+        self._program = program
+        self._result: MmcsResult | None = None
+
+    @property
+    def completed(self) -> bool:
+        return self._result is not None
+
+    def result(self, *, timeout_s: float) -> MmcsResult:
+        if self._result is not None:
+            return self._result
+        self._service._require_active_run(self)
+        self._result = self._service._finish(self._program, timeout_s=timeout_s)
+        return self._result
+
+
+class MmcsService(BaseInstrumentService):
     def __init__(self, driver: MmcsHardwareDriver, *, cleanup_timeout_s: float) -> None:
         if cleanup_timeout_s <= 0:
             raise ValidationError("cleanup_timeout_s must be positive")
-        self.driver = driver
-        self.cleanup_timeout_s = cleanup_timeout_s
-        self._prepared: MmcsProgram | None = None
-        self._prepared_generation: int | None = None
-        self._running = False
+        super().__init__(driver)
+        self.cleanup_timeout_s = float(cleanup_timeout_s)
+        self._hardware_running = False
         self._started_at_s = 0.0
 
-    def _require_connected(self) -> None:
-        if not self.driver.is_connected:
-            raise InstrumentStateError("MMCS driver must be connected")
+    @property
+    def driver(self) -> MmcsHardwareDriver:
+        return self._driver
 
     def _cleanup_after_error(self, exc: BaseException, master_box: str) -> None:
         try:
@@ -36,21 +56,9 @@ class MmcsExecutor:
             self.driver.clear_all_trigger_ram()
         except Exception as cleanup_exc:
             exc.add_note(f"MMCS trigger cleanup after failure also failed: {cleanup_exc}")
+        self._hardware_running = False
 
-    def _require_prepared(self) -> MmcsProgram:
-        self._require_connected()
-        if self._prepared is None:
-            raise InstrumentStateError("No MMCS program has been prepared")
-        if self._prepared_generation != self.driver.generation:
-            raise InstrumentStateError("Prepared MMCS program is invalid after reconnect")
-        return self._prepared
-
-    def prepare(self, program: MmcsProgram) -> None:
-        self._require_connected()
-        if self._running:
-            raise InstrumentStateError("Cannot prepare while an MMCS program is running")
-        self._prepared = None
-        self._prepared_generation = None
+    def _prepare(self, program: MmcsProgram) -> None:
         try:
             self.driver.stop_all(program.master_box, timeout_s=self.cleanup_timeout_s)
             self.driver.clear_all_trigger_ram()
@@ -92,13 +100,8 @@ class MmcsExecutor:
         except BaseException as exc:
             self._cleanup_after_error(exc, program.master_box)
             raise
-        self._prepared = program
-        self._prepared_generation = self.driver.generation
 
-    def start(self) -> None:
-        program = self._require_prepared()
-        if self._running:
-            raise InstrumentStateError("An MMCS program is already running")
+    def _start(self, program: MmcsProgram) -> None:
         self._started_at_s = time.perf_counter()
         try:
             for adc in program.adc_programs:
@@ -111,25 +114,20 @@ class MmcsExecutor:
         except BaseException as exc:
             self._cleanup_after_error(exc, program.master_box)
             raise
-        self._running = True
+        self._hardware_running = True
 
-    def _require_running(self) -> MmcsProgram:
-        program = self._require_prepared()
-        if not self._running:
-            raise InstrumentStateError("MMCS program is not running")
-        return program
-
-    def wait(self, *, timeout_s: float) -> MmcsResult:
+    def _finish(self, program: MmcsProgram, *, timeout_s: float) -> MmcsResult:
         if timeout_s <= 0:
             raise ValidationError("timeout_s must be positive")
-        program = self._require_running()
         try:
             self.driver.wait(program.master_box, timeout_s=timeout_s)
             results: dict[str, MmcsIqResult] = {}
             for adc in program.adc_programs:
                 raw = self.driver.fetch_iq(adc.board_id)
                 if not isinstance(raw, (tuple, list)) or len(raw) != 5:
-                    raise ProtocolError(f"MMCS ADC {adc.board_id!r} returned malformed IQ data")
+                    raise ProtocolError(
+                        f"MMCS ADC {adc.board_id!r} returned malformed IQ data"
+                    )
                 arrays = tuple(np.asarray(value) for value in raw)
                 if any(array.ndim != 2 or array.shape[0] != 12 for array in arrays):
                     shapes = [array.shape for array in arrays]
@@ -146,8 +144,7 @@ class MmcsExecutor:
         except BaseException as exc:
             self._cleanup_after_error(exc, program.master_box)
             raise
-        finally:
-            self._running = False
+        self._hardware_running = False
         return MmcsResult(
             iq_by_adc=results,
             period_ns=program.period_ns,
@@ -156,12 +153,33 @@ class MmcsExecutor:
             program_fingerprint=program.fingerprint(),
         )
 
-    def stop(self) -> None:
-        program = self._require_running()
+    def _stop(self, program: MmcsProgram) -> None:
         self.driver.stop_all(program.master_box, timeout_s=self.cleanup_timeout_s)
-        self._running = False
+        self._hardware_running = False
 
-    def execute(self, program: MmcsProgram, *, timeout_s: float) -> MmcsResult:
-        self.prepare(program)
-        self.start()
-        return self.wait(timeout_s=timeout_s)
+    @contextmanager
+    def running(self, program: MmcsProgram) -> Iterator[MmcsRun]:
+        self._require_connected()
+        if self._active_run is not None:
+            raise InstrumentStateError("Instrument service is already running")
+        self._prepare(program)
+        self._start(program)
+        run = MmcsRun(self, program)
+        self._activate_run(run)
+        primary_error: BaseException | None = None
+        try:
+            yield run
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            try:
+                if self._hardware_running:
+                    self._stop(program)
+            except Exception as cleanup_exc:
+                if primary_error is not None:
+                    primary_error.add_note(f"Stopping MMCS also failed: {cleanup_exc}")
+                else:
+                    raise
+            finally:
+                self._deactivate_run(run)

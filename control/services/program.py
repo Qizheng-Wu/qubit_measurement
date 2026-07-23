@@ -1,4 +1,4 @@
-"""Convenience builders for common MMCS output programs."""
+"""Reusable MMCS program construction."""
 
 from __future__ import annotations
 
@@ -7,8 +7,7 @@ import math
 import numpy as np
 
 from control.core.exceptions import ValidationError
-
-from .model import (
+from control.domain.mmcs.model import (
     DacChannel,
     DacPlayMode,
     DacProgram,

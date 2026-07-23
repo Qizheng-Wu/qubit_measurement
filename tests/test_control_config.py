@@ -5,9 +5,8 @@ from pydantic import ValidationError as PydanticValidationError
 
 from control.config import MmcsDeviceConfig, SpectrumAnalyzerDeviceConfig, load_control_config
 from control.core.exceptions import ConfigurationError
-from control.driver.mmcs import MmcsHardwareDriver
-from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
 from control.factory import InstrumentFactory
+from control.services import MmcsService, SpectrumAnalyzerService
 
 
 VALID_CONFIG = """
@@ -79,12 +78,12 @@ safety_margin_s = 2
 def test_factory_uses_resolved_connection_and_cleanup_defaults(tmp_path):
     config = load_control_config(write_config(tmp_path))
     factory = InstrumentFactory(config)
-    sa = factory.create_spectrum_analyzer("sa")
-    mmcs = factory.create_mmcs("mmcs")
-    assert isinstance(sa, SpectrumAnalyzerDriver)
-    assert isinstance(mmcs, MmcsHardwareDriver)
-    assert sa.transport.timeout_s == 12.5
-    assert mmcs.shutdown_timeout_s == 5
+    sa = factory.create_spectrum_analyzer_service("sa")
+    mmcs = factory.create_mmcs_service("mmcs")
+    assert isinstance(sa, SpectrumAnalyzerService)
+    assert isinstance(mmcs, MmcsService)
+    assert sa.driver.transport.timeout_s == 12.5
+    assert mmcs.driver.shutdown_timeout_s == 5
 
 
 def test_unknown_dac_board_is_configuration_error(tmp_path):

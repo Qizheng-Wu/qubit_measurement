@@ -3,26 +3,27 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-
-from control.application import (
-    MmcsExecutor,
-    SpectrumAnalyzerController,
-    acquire_spectrum_while_mmcs_runs,
-)
 from control.config import (
+    ControlConfig,
     MmcsDeviceConfig,
     SpectrumAnalyzerDeviceConfig,
     load_control_config,
 )
 from control.domain.mmcs import (
     DacChannel,
+    GeneratedSingleTone,
+    MmcsProgram,
     SingleToneSpec,
+)
+from control.domain.sweep import SpectrumSweepConfig
+from control.domain.trace import SpectrumTrace
+from control.factory import InstrumentFactory
+from control.services import (
+    MmcsService,
+    SpectrumAnalyzerService,
     build_cyclic_dac_program,
     generate_single_tone,
 )
-from control.domain.sweep import SpectrumSweepConfig
-from control.factory import InstrumentFactory
 
 CONFIG_PATH = Path("config/instruments.local.toml")
 RUN_HARDWARE = False
@@ -54,10 +55,96 @@ EXPERIMENT = ExperimentSpec(
 )
 
 
-def _plot(trace, actual_frequency_hz: float) -> None:
+@dataclass(frozen=True)
+class ExperimentPlan:
+    tone: GeneratedSingleTone
+    mmcs_program: MmcsProgram
+    spectrum_config: SpectrumSweepConfig
+    spectrum_timeout_s: float
+    safety_window_s: float
+
+
+def resolve_experiment(
+    spec: ExperimentSpec,
+    config: ControlConfig,
+) -> ExperimentPlan:
+    mmcs_config = config.require(spec.mmcs_name, MmcsDeviceConfig)
+    config.require(spec.spectrum_analyzer_name, SpectrumAnalyzerDeviceConfig)
+    board = mmcs_config.require_dac_board(spec.dac_board_id)
+    spectrum_defaults = config.defaults.spectrum_sweep
+    awg_defaults = config.defaults.mmcs_awg
+
+    tone = generate_single_tone(
+        SingleToneSpec(
+            sample_rate_hz=board.sample_rate_hz,
+            frequency_hz=spec.tone_frequency_hz,
+            amplitude=spec.tone_amplitude,
+            phase_rad=spec.tone_phase_rad,
+            minimum_samples=awg_defaults.minimum_waveform_samples,
+        )
+    )
+    timeout = spectrum_defaults.acquisition_timeout_s
+    safety_window = timeout + awg_defaults.safety_margin_s
+    program = build_cyclic_dac_program(
+        tone.waveform,
+        board_id=spec.dac_board_id,
+        channel=spec.dac_channel,
+        master_box=spec.master_box,
+        run_duration_s=safety_window,
+        period_ns=awg_defaults.period_ns,
+        start_trigger_ns=awg_defaults.start_trigger_ns,
+    )
+    spectrum_config = SpectrumSweepConfig.from_center_span(
+        center_hz=tone.actual_frequency_hz,
+        span_hz=spec.spectrum_span_hz,
+        points=spectrum_defaults.points,
+        resolution_bandwidth_hz=(
+            spec.spectrum_span_hz * spectrum_defaults.rbw_span_ratio
+        ),
+        input_attenuation_db=spectrum_defaults.input_attenuation_db,
+    )
+    return ExperimentPlan(
+        tone=tone,
+        mmcs_program=program,
+        spectrum_config=spectrum_config,
+        spectrum_timeout_s=timeout,
+        safety_window_s=safety_window,
+    )
+
+
+def print_plan(spec: ExperimentSpec, plan: ExperimentPlan) -> None:
+    tone = plan.tone
+    spectrum_config = plan.spectrum_config
+    print(
+        f"board={spec.dac_board_id}, channel={spec.dac_channel.value}, "
+        f"sample_rate={tone.spec.sample_rate_hz / 1e9:.6f} GHz, "
+        f"requested={spec.tone_frequency_hz / 1e6:.6f} MHz, "
+        f"actual={tone.actual_frequency_hz / 1e6:.6f} MHz, "
+        f"samples={tone.waveform.samples.size}, period={plan.mmcs_program.period_ns} ns, "
+        f"RBW={spectrum_config.resolution_bandwidth_hz / 1e3:.3f} kHz, "
+        f"attenuation={spectrum_config.input_attenuation_db:.1f} dB, "
+        f"timeout={plan.spectrum_timeout_s:.1f} s, "
+        f"safety_window={plan.safety_window_s:.1f} s"
+    )
+
+
+def run_experiment(
+    mmcs: MmcsService,
+    spectrum: SpectrumAnalyzerService,
+    plan: ExperimentPlan,
+) -> SpectrumTrace:
+    with mmcs.connected(), spectrum.connected():
+        with mmcs.running(plan.mmcs_program):
+            with spectrum.running(plan.spectrum_config) as sweep:
+                return sweep.result(timeout_s=plan.spectrum_timeout_s)
+
+
+def plot_result(trace: SpectrumTrace, plan: ExperimentPlan) -> None:
+    import matplotlib.pyplot as plt
+
     plt.plot(trace.frequency_hz / 1e6, trace.power_dbm)
     plt.axvline(
-        actual_frequency_hz / 1e6,
+        plan.tone.actual_frequency_hz / 1e6,
         color="tab:red",
         linestyle="--",
         label="generated tone",
@@ -73,68 +160,19 @@ def _plot(trace, actual_frequency_hz: float) -> None:
 
 def main() -> int:
     config = load_control_config(CONFIG_PATH)
-    mmcs_config = config.require(EXPERIMENT.mmcs_name, MmcsDeviceConfig)
-    config.require(EXPERIMENT.spectrum_analyzer_name, SpectrumAnalyzerDeviceConfig)
-    board = mmcs_config.require_dac_board(EXPERIMENT.dac_board_id)
-    spectrum_defaults = config.defaults.spectrum_sweep
-    awg_defaults = config.defaults.mmcs_awg
-
-    tone = generate_single_tone(
-        SingleToneSpec(
-            sample_rate_hz=board.sample_rate_hz,
-            frequency_hz=EXPERIMENT.tone_frequency_hz,
-            amplitude=EXPERIMENT.tone_amplitude,
-            phase_rad=EXPERIMENT.tone_phase_rad,
-            minimum_samples=awg_defaults.minimum_waveform_samples,
-        )
-    )
-    timeout = spectrum_defaults.acquisition_timeout_s
-    safety_window = timeout + awg_defaults.safety_margin_s
-    program = build_cyclic_dac_program(
-        tone.waveform,
-        board_id=EXPERIMENT.dac_board_id,
-        channel=EXPERIMENT.dac_channel,
-        master_box=EXPERIMENT.master_box,
-        run_duration_s=safety_window,
-        period_ns=awg_defaults.period_ns,
-        start_trigger_ns=awg_defaults.start_trigger_ns,
-    )
-    spectrum_config = SpectrumSweepConfig.from_center_span(
-        center_hz=tone.actual_frequency_hz,
-        span_hz=EXPERIMENT.spectrum_span_hz,
-        points=spectrum_defaults.points,
-        resolution_bandwidth_hz=(
-            EXPERIMENT.spectrum_span_hz * spectrum_defaults.rbw_span_ratio
-        ),
-        input_attenuation_db=spectrum_defaults.input_attenuation_db,
-    )
-
-    print(
-        f"board={EXPERIMENT.dac_board_id}, channel={EXPERIMENT.dac_channel.value}, "
-        f"sample_rate={tone.spec.sample_rate_hz / 1e9:.6f} GHz, "
-        f"requested={EXPERIMENT.tone_frequency_hz / 1e6:.6f} MHz, "
-        f"actual={tone.actual_frequency_hz / 1e6:.6f} MHz, "
-        f"samples={tone.waveform.samples.size}, period={program.period_ns} ns, "
-        f"RBW={spectrum_config.resolution_bandwidth_hz / 1e3:.3f} kHz, "
-        f"attenuation={spectrum_config.input_attenuation_db:.1f} dB, "
-        f"timeout={timeout:.1f} s, safety_window={safety_window:.1f} s"
-    )
+    plan = resolve_experiment(EXPERIMENT, config)
+    print_plan(EXPERIMENT, plan)
     if not RUN_HARDWARE:
         print("Dry run only. Set RUN_HARDWARE=True after checking cabling and attenuation.")
         return 0
 
     factory = InstrumentFactory(config)
-    cleanup_timeout = config.defaults.mmcs_execution.cleanup_timeout_s
-    with factory.create_mmcs(EXPERIMENT.mmcs_name) as mmcs_driver:
-        with factory.create_spectrum_analyzer(EXPERIMENT.spectrum_analyzer_name) as analyzer_driver:
-            trace = acquire_spectrum_while_mmcs_runs(
-                MmcsExecutor(mmcs_driver, cleanup_timeout_s=cleanup_timeout),
-                SpectrumAnalyzerController(analyzer_driver),
-                program=program,
-                spectrum_config=spectrum_config,
-                spectrum_timeout_s=timeout,
-            )
-    _plot(trace, tone.actual_frequency_hz)
+    trace = run_experiment(
+        factory.create_mmcs_service(EXPERIMENT.mmcs_name),
+        factory.create_spectrum_analyzer_service(EXPERIMENT.spectrum_analyzer_name),
+        plan,
+    )
+    plot_result(trace, plan)
     return 0
 
 
