@@ -1,13 +1,11 @@
 """Display the spectrum of a single tone from one configured MMCS DAC board."""
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from control.config import (
     ControlConfig,
     MmcsDeviceConfig,
     SpectrumAnalyzerDeviceConfig,
-    load_control_config,
 )
 from control.domain.mmcs import (
     DacChannel,
@@ -24,9 +22,8 @@ from control.services import (
     build_cyclic_dac_program,
     generate_single_tone,
 )
+from experiment.config import load_config
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = PROJECT_ROOT / "config" / "instruments.local.toml"
 RUN_HARDWARE = False
 
 
@@ -160,7 +157,7 @@ def plot_result(trace: SpectrumTrace, plan: ExperimentPlan) -> None:
 
 
 def main() -> int:
-    config = load_control_config(CONFIG_PATH)
+    config = load_config()
     plan = resolve_experiment(EXPERIMENT, config)
     print_plan(EXPERIMENT, plan)
     if not RUN_HARDWARE:

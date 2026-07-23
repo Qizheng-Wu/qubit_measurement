@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from control.core.exceptions import AcquisitionError
-from experiment.mmcs_awg_spectrum import CONFIG_PATH, run_experiment
+from experiment.config import DEFAULT_CONFIG_PATH, load_config
+from experiment.mmcs_awg_spectrum import run_experiment
 
 
 class FakeMmcsService:
@@ -71,10 +72,11 @@ def make_plan():
 
 
 def test_config_path_is_independent_of_working_directory():
-    assert CONFIG_PATH.is_absolute()
-    assert CONFIG_PATH.name == "instruments.local.toml"
-    assert CONFIG_PATH.parent.name == "config"
-    assert CONFIG_PATH.is_file()
+    assert DEFAULT_CONFIG_PATH.is_absolute()
+    assert DEFAULT_CONFIG_PATH.name == "instruments.local.toml"
+    assert DEFAULT_CONFIG_PATH.parent.name == "config"
+    assert DEFAULT_CONFIG_PATH.is_file()
+    assert load_config().schema_version == 2
 
 
 def test_experiment_nests_instrument_lifecycles():
