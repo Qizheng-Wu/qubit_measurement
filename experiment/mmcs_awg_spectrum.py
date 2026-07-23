@@ -38,6 +38,7 @@ class ExperimentSpec:
     tone_amplitude: float
     tone_phase_rad: float
     spectrum_span_hz: float
+    spectrum_sample_points: int
 
 
 EXPERIMENT = ExperimentSpec(
@@ -50,6 +51,7 @@ EXPERIMENT = ExperimentSpec(
     tone_amplitude=0.02,
     tone_phase_rad=0.0,
     spectrum_span_hz=10e6,
+    spectrum_sample_points=501
 )
 
 
@@ -95,7 +97,7 @@ def resolve_experiment(
     spectrum_config = SpectrumSweepConfig.from_center_span(
         center_hz=tone.actual_frequency_hz,
         span_hz=spec.spectrum_span_hz,
-        points=spectrum_defaults.points,
+        points=spec.spectrum_sample_points,
         resolution_bandwidth_hz=(
             spec.spectrum_span_hz * spectrum_defaults.rbw_span_ratio
         ),

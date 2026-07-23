@@ -24,7 +24,6 @@ box1 = "192.168.4.8"
 sample_rate_hz = 2e9
 
 [defaults.spectrum_sweep]
-points = 501
 rbw_span_ratio = 0.01
 input_attenuation_db = 20.0
 acquisition_timeout_s = 30.0
