@@ -9,7 +9,12 @@ from control.services import resolve_spectrum_sweep, resolve_vna_sweep
 
 
 def test_vna_resolver_uses_defaults_and_selective_override():
-    defaults = VnaSweepDefaults()
+    defaults = VnaSweepDefaults(
+        points=1001,
+        bandwidth_hz=1e3,
+        averages=1,
+        acquisition_timeout_s=30,
+    )
     resolved = resolve_vna_sweep(
         defaults,
         start_hz=4e9,
@@ -35,8 +40,14 @@ def test_vna_resolver_uses_defaults_and_selective_override():
 
 
 def test_spectrum_rbw_is_derived_from_span_or_overridden():
-    defaults = SpectrumSweepDefaults()
+    defaults = SpectrumSweepDefaults(
+        points=501,
+        rbw_span_ratio=0.01,
+        input_attenuation_db=20,
+        acquisition_timeout_s=30,
+    )
     resolved = resolve_spectrum_sweep(defaults, start_hz=10e6, stop_hz=30e6)
+    assert resolved.config.points == 501
     assert resolved.config.resolution_bandwidth_hz == 200e3
     assert resolved.config.input_attenuation_db == 20
 
@@ -47,6 +58,7 @@ def test_spectrum_rbw_is_derived_from_span_or_overridden():
         resolution_bandwidth_hz=10e3,
     )
     assert overridden.config.resolution_bandwidth_hz == 10e3
+    assert overridden.config.points == 501
 
 
 @pytest.mark.parametrize(

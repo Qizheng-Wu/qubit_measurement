@@ -76,7 +76,7 @@ def test_config_path_is_independent_of_working_directory():
     assert DEFAULT_CONFIG_PATH.name == "instruments.local.toml"
     assert DEFAULT_CONFIG_PATH.parent.name == "config"
     assert DEFAULT_CONFIG_PATH.is_file()
-    assert load_config().schema_version == 2
+    assert load_config().schema_version == 3
 
 
 def test_experiment_nests_instrument_lifecycles():

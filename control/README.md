@@ -1,11 +1,18 @@
 # Instrument control configuration
 
-Copy `config/instruments.example.toml` to `config/instruments.local.toml` and
-replace the example addresses. Schema version 2 separates three concerns:
+Copy the complete `config/instruments.example.toml` to
+`config/instruments.local.toml` and replace the example addresses. The local
+TOML file is the only source of runtime configuration; the Python models do
+not supply fallback values. Schema version 3 separates three concerns:
 
 - `instruments`: shared connection inventory and hardware facts;
 - `defaults`: shared engineering-policy defaults;
 - experiment specs: physical intent and the hardware path selected for one run.
+
+Every field and every subsection shown in the example is required. To disable
+a VISA read or write termination explicitly, set the corresponding TOML value
+to an empty string; it is normalized to `None` when the configuration is loaded.
+Version 2 files are not migrated automatically.
 
 MMCS DAC sample rates are hardware facts and must be registered per board:
 

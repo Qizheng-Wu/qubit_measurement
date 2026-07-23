@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Mapping, TypeVar
+from typing import Annotated, Literal, Mapping, TypeVar
 
 from pydantic import Field, field_validator, model_validator
 
@@ -16,17 +16,22 @@ NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 class VisaDeviceConfig(FrozenModel):
     address: Annotated[str, Field(min_length=1)]
-    transport_timeout_s: PositiveFloat = 10.0
-    read_termination: str | None = "\n"
-    write_termination: str | None = "\n"
+    transport_timeout_s: PositiveFloat
+    read_termination: str | None
+    write_termination: str | None
+
+    @field_validator("read_termination", "write_termination", mode="before")
+    @classmethod
+    def normalize_disabled_termination(cls, value: object) -> object:
+        return None if value == "" else value
 
 
 class VnaDeviceConfig(VisaDeviceConfig):
-    type: Literal["vna"] = "vna"
+    type: Literal["vna"]
 
 
 class SpectrumAnalyzerDeviceConfig(VisaDeviceConfig):
-    type: Literal["spectrum_analyzer"] = "spectrum_analyzer"
+    type: Literal["spectrum_analyzer"]
 
 
 class MmcsDacBoardConfig(FrozenModel):
@@ -34,7 +39,7 @@ class MmcsDacBoardConfig(FrozenModel):
 
 
 class MmcsDeviceConfig(FrozenModel):
-    type: Literal["mmcs"] = "mmcs"
+    type: Literal["mmcs"]
     boxes: Mapping[str, Annotated[str, Field(min_length=1)]]
     dac_boards: Mapping[str, MmcsDacBoardConfig]
 
@@ -59,28 +64,28 @@ class MmcsDeviceConfig(FrozenModel):
 
 
 class VnaSweepDefaults(FrozenModel):
-    points: Annotated[int, Field(ge=2)] = 1001
-    bandwidth_hz: PositiveFloat = 1e3
-    averages: Annotated[int, Field(ge=1)] = 1
-    acquisition_timeout_s: PositiveFloat = 30.0
+    points: Annotated[int, Field(ge=2)]
+    bandwidth_hz: PositiveFloat
+    averages: Annotated[int, Field(ge=1)]
+    acquisition_timeout_s: PositiveFloat
 
 
 class SpectrumSweepDefaults(FrozenModel):
-    points: Annotated[int, Field(ge=2)] = 501
-    rbw_span_ratio: PositiveFloat = 0.01
-    input_attenuation_db: NonNegativeFloat = 20.0
-    acquisition_timeout_s: PositiveFloat = 30.0
+    points: Annotated[int, Field(ge=2)]
+    rbw_span_ratio: PositiveFloat
+    input_attenuation_db: NonNegativeFloat
+    acquisition_timeout_s: PositiveFloat
 
 
 class MmcsExecutionDefaults(FrozenModel):
-    cleanup_timeout_s: PositiveFloat = 5.0
+    cleanup_timeout_s: PositiveFloat
 
 
 class MmcsAwgDefaults(FrozenModel):
-    minimum_waveform_samples: Annotated[int, Field(ge=8)] = 800
-    period_ns: Annotated[int, Field(ge=4)] = 1_000_000
-    start_trigger_ns: Annotated[int, Field(ge=4)] = 40
-    safety_margin_s: PositiveFloat = 5.0
+    minimum_waveform_samples: Annotated[int, Field(ge=8)]
+    period_ns: Annotated[int, Field(ge=4)]
+    start_trigger_ns: Annotated[int, Field(ge=4)]
+    safety_margin_s: PositiveFloat
 
     @model_validator(mode="after")
     def validate_trigger_window(self) -> "MmcsAwgDefaults":
@@ -92,10 +97,10 @@ class MmcsAwgDefaults(FrozenModel):
 
 
 class ControlDefaults(FrozenModel):
-    vna_sweep: VnaSweepDefaults = Field(default_factory=VnaSweepDefaults)
-    spectrum_sweep: SpectrumSweepDefaults = Field(default_factory=SpectrumSweepDefaults)
-    mmcs_execution: MmcsExecutionDefaults = Field(default_factory=MmcsExecutionDefaults)
-    mmcs_awg: MmcsAwgDefaults = Field(default_factory=MmcsAwgDefaults)
+    vna_sweep: VnaSweepDefaults
+    spectrum_sweep: SpectrumSweepDefaults
+    mmcs_execution: MmcsExecutionDefaults
+    mmcs_awg: MmcsAwgDefaults
 
 
 DeviceConfig = Annotated[
@@ -111,9 +116,9 @@ DeviceConfigT = TypeVar(
 
 
 class ControlConfig(FrozenModel):
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     instruments: Mapping[str, DeviceConfig]
-    defaults: ControlDefaults = Field(default_factory=ControlDefaults)
+    defaults: ControlDefaults
 
     @field_validator("instruments", mode="after")
     @classmethod
