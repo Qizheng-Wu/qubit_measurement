@@ -25,7 +25,8 @@ from control.services import (
     generate_single_tone,
 )
 
-CONFIG_PATH = Path("config/instruments.local.toml")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = PROJECT_ROOT / "config" / "instruments.local.toml"
 RUN_HARDWARE = False
 
 
