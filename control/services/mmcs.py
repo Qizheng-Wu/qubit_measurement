@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Any, Iterator
 
 import numpy as np
 
@@ -46,6 +46,12 @@ class MmcsService(BaseInstrumentService):
     @property
     def driver(self) -> MmcsHardwareDriver:
         return self._driver
+
+    def check_status(self) -> Any:
+        """Query every configured MMCS backplane and board for its FPGA version."""
+
+        self._require_connected()
+        return self.driver.identify()
 
     def _cleanup_after_error(self, exc: BaseException, master_box: str) -> None:
         try:

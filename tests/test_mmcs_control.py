@@ -182,6 +182,19 @@ def test_connection_and_running_guards_and_stale_handle():
         stale.result(timeout_s=1)
 
 
+def test_status_check_requires_connection_and_forwards_response():
+    backend = FakeMmcsBackend()
+    _, service = make_service(backend)
+
+    with pytest.raises(InstrumentStateError, match="connected"):
+        service.check_status()
+
+    with service.connected():
+        assert service.check_status() == 0
+
+    assert [call[0] for call in backend.calls].count("sys_get_fpga_version") == 1
+
+
 def test_body_error_is_preserved_when_stop_also_fails():
     backend = FakeMmcsBackend()
     _, service = make_service(backend)
