@@ -23,7 +23,7 @@ def main():
     tone = generate_single_tone(
         SingleToneSpec(
             sample_rate_hz=board.sample_rate_hz,
-            frequency_hz=5e9,
+            frequency_hz=20e6,
             amplitude=0.02,
             phase_rad=0,
             minimum_samples=awg_defaults.minimum_waveform_samples,
