@@ -41,5 +41,5 @@ def main():
     )
 
     with mmcs_service.connected():
-        with mmcs_service.running(program):
-            return 0
+        with mmcs_service.running(program) as run:
+            run.result(timeout_s=35)

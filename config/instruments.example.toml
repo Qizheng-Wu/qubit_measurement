@@ -20,8 +20,8 @@ type = "mmcs"
 [instruments.mmcs.boxes]
 box1 = "192.168.4.8"
 
-[instruments.mmcs.dac_boards.da_box1pcie1ch12]
-sample_rate_hz = 2e9
+[instruments.mmcs.dac_boards.da_box1pcie2ch12]
+sample_rate_hz = 500e6
 
 [defaults.spectrum_sweep]
 rbw_span_ratio = 0.01
