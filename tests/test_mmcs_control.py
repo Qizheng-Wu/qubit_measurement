@@ -7,32 +7,48 @@ from pydantic import ValidationError as PydanticValidationError
 from control.core.exceptions import InstrumentCommandError, InstrumentStateError
 from control.domain.mmcs import (
     AdcProgram,
+    DacBoardProgram,
     DacChannel,
+    DacChannelProgram,
     DacPlayMode,
-    DacProgram,
     DacWaveform,
     DemodulationWeights,
+    IqCalibration,
+    IqToneSpec,
     MmcsProgram,
     PlaylistEntry,
     SingleToneSpec,
+    Sideband,
     TriggerCommand,
     TriggerEvent,
 )
 from control.driver.mmcs import MmcsHardwareDriver
-from control.services import MmcsService, build_cyclic_dac_program, generate_single_tone
+from control.services import (
+    MmcsService,
+    build_cyclic_dac_program,
+    build_iq_upconversion_program,
+    generate_iq_tone,
+    generate_single_tone,
+)
 from control.transport.mmcs_vendor import MmcsVendorTransport
 
 
 class FakeMmcsBackend:
-    def __init__(self, *, fail_method=None):
+    def __init__(self, *, fail_method=None, fail_call_number=None):
         self.calls = []
         self.fail_method = fail_method
+        self.fail_call_number = fail_call_number
+        self.method_call_counts = {}
         self.closed = False
 
     def __getattr__(self, name):
         def method(*args, **kwargs):
             self.calls.append((name, args, kwargs))
-            if name == self.fail_method:
+            self.method_call_counts[name] = self.method_call_counts.get(name, 0) + 1
+            if name == self.fail_method and (
+                self.fail_call_number is None
+                or self.method_call_counts[name] == self.fail_call_number
+            ):
                 raise RuntimeError("injected failure")
             if name == "ad_get_IQ":
                 return tuple(np.zeros((12, 2)) + index for index in range(5))
@@ -47,19 +63,25 @@ class FakeMmcsBackend:
 
 def make_program(**changes):
     waveform = DacWaveform(samples=np.zeros(8))
+    playlist = (PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),)
     weights = DemodulationWeights(channel=0, i=np.zeros(8), q=np.zeros(8))
     values = dict(
         master_box="box1",
         period_ns=100,
         repetitions=2,
-        dac_programs=(
-            DacProgram(
+        dac_boards=(
+            DacBoardProgram(
                 board_id="da_box1pcie1ch12",
-                channel=DacChannel.I,
-                waveforms=(waveform,),
-                playlist=(PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),),
-                play_mode=DacPlayMode.END_WITH_ZERO,
                 triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
+                channels=tuple(
+                    DacChannelProgram(
+                        channel=channel,
+                        waveforms=(waveform,),
+                        playlist=playlist,
+                        play_mode=DacPlayMode.END_WITH_ZERO,
+                    )
+                    for channel in DacChannel
+                ),
             ),
         ),
         adc_programs=(
@@ -99,7 +121,8 @@ def test_each_run_prepares_and_result_is_cached():
     assert first.iq_by_adc["ad_box1pcie1ch12"].i_sum.shape == (12, 2)
     assert first.program_fingerprint == second.program_fingerprint
     names = [call[0] for call in backend.calls]
-    assert names.count("da_set_multi_waveform") == 2
+    assert names.count("da_set_multi_waveform") == 4
+    assert names.count("da_set_level2_trigger_ram") == 2
     assert names.count("sys_run_level1_trigger") == 2
     with pytest.raises(ValueError):
         first.iq_by_adc["ad_box1pcie1ch12"].i_sum[0, 0] = 1
@@ -159,6 +182,31 @@ def test_prepare_failure_cleans_up_without_entering_body():
             with service.running(make_program()):
                 entered = True
     assert not entered
+
+
+@pytest.mark.parametrize(
+    ("fail_method", "fail_call_number"),
+    [
+        ("da_clear_wave_ram", None),
+        ("da_set_multi_waveform", 2),
+        ("da_set_level2_trigger_ram", None),
+    ],
+)
+def test_each_board_prepare_stage_failure_prevents_start_and_cleans_up(
+    fail_method, fail_call_number
+):
+    backend = FakeMmcsBackend(
+        fail_method=fail_method,
+        fail_call_number=fail_call_number,
+    )
+    _, service = make_service(backend)
+    with service.connected():
+        with pytest.raises(InstrumentCommandError):
+            with service.running(make_program(adc_programs=())):
+                pytest.fail("failed prepare must not enter the run body")
+    names = [call[0] for call in backend.calls]
+    assert "sys_run_level1_trigger" not in names
+    assert names.count("sys_clear_all_level2_trigger_ram") >= 2
 
 
 def test_connection_and_running_guards_and_stale_handle():
@@ -230,6 +278,71 @@ def test_generate_single_tone_is_aligned_bounded_and_periodic():
     assert abs(tone.actual_frequency_hz - 23e6) <= tone.spec.sample_rate_hz / samples.size / 2
 
 
+def iq_tone_spec(**changes):
+    values = dict(
+        sample_rate_hz=2e9,
+        if_frequency_hz=20e6,
+        amplitude=0.1,
+        phase_rad=0.0,
+        minimum_samples=800,
+        sideband=Sideband.UPPER,
+        calibration=IqCalibration(),
+    )
+    values.update(changes)
+    return IqToneSpec(**values)
+
+
+def test_generate_iq_tone_is_shared_periodic_pair_and_sideband_flips_q_only():
+    upper = generate_iq_tone(iq_tone_spec())
+    lower = generate_iq_tone(iq_tone_spec(sideband=Sideband.LOWER))
+
+    assert upper.actual_if_frequency_hz == 20e6
+    assert upper.i_waveform.samples.size == upper.q_waveform.samples.size == 800
+    np.testing.assert_allclose(upper.i_waveform.samples, lower.i_waveform.samples)
+    np.testing.assert_allclose(upper.q_waveform.samples, -lower.q_waveform.samples)
+    assert upper.i_waveform.samples[0] == pytest.approx(0.1)
+    assert upper.q_waveform.samples[0] == pytest.approx(0.0)
+
+
+def test_generate_iq_tone_applies_calibration_formula():
+    calibration = IqCalibration(
+        i_gain=2.0,
+        q_gain=3.0,
+        i_offset=0.1,
+        q_offset=-0.2,
+        q_phase_correction_rad=np.pi / 2,
+        q_polarity=-1,
+    )
+    tone = generate_iq_tone(iq_tone_spec(amplitude=0.1, calibration=calibration))
+    assert tone.i_waveform.samples[0] == pytest.approx(0.3)
+    assert tone.q_waveform.samples[0] == pytest.approx(-0.5)
+
+
+def test_generate_iq_tone_rejects_calibrated_overflow():
+    with pytest.raises(ValueError, match="exceeds"):
+        generate_iq_tone(
+            iq_tone_spec(
+                amplitude=1.0,
+                calibration=IqCalibration(i_gain=1.0, i_offset=0.1),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "calibration",
+    [
+        {"i_gain": 0.0},
+        {"q_gain": -1.0},
+        {"q_polarity": 0},
+        {"i_offset": 1.1},
+        {"q_phase_correction_rad": np.nan},
+    ],
+)
+def test_invalid_iq_calibration_is_rejected(calibration):
+    with pytest.raises(PydanticValidationError):
+        IqCalibration(**calibration)
+
+
 @pytest.mark.parametrize(
     "changes",
     [
@@ -259,26 +372,135 @@ def test_build_cyclic_dac_program():
         period_ns=1_000_000,
         start_trigger_ns=40,
     )
-    dac = program.dac_programs[0]
+    board = program.dac_boards[0]
     assert not program.adc_programs
     assert program.repetitions == 3
-    assert dac.play_mode is DacPlayMode.CYCLE
-    assert [event.command for event in dac.triggers] == [
+    assert {channel.channel for channel in board.channels} == {DacChannel.I, DacChannel.Q}
+    assert all(channel.play_mode is DacPlayMode.CYCLE for channel in board.channels)
+    assert np.all(board.channels[1].waveforms[0].samples == 0)
+    assert [event.command for event in board.triggers] == [
         TriggerCommand.START,
         TriggerCommand.STOP,
     ]
 
 
-def invalid_waveform_program():
-    dac = DacProgram(
-        board_id="da",
-        channel=DacChannel.I,
-        waveforms=(DacWaveform(samples=np.zeros(7)),),
-        playlist=(PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),),
-        play_mode=DacPlayMode.END_WITH_ZERO,
-        triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
+def test_build_iq_upconversion_program_uses_generated_pair():
+    tone = generate_iq_tone(iq_tone_spec())
+    program = build_iq_upconversion_program(
+        tone,
+        board_id="da_box1pcie1ch12",
+        master_box="box1",
+        run_duration_s=0.003,
+        period_ns=1_000_000,
+        start_trigger_ns=40,
     )
-    return make_program(dac_programs=(dac,))
+    channels = {channel.channel: channel for channel in program.dac_boards[0].channels}
+    np.testing.assert_array_equal(
+        channels[DacChannel.I].waveforms[0].samples, tone.i_waveform.samples
+    )
+    np.testing.assert_array_equal(
+        channels[DacChannel.Q].waveforms[0].samples, tone.q_waveform.samples
+    )
+
+
+def test_dac_board_requires_unique_iq_pair_and_matching_channel_structure():
+    program = make_program(adc_programs=())
+    board = program.dac_boards[0]
+    with pytest.raises(PydanticValidationError, match="must declare I and Q"):
+        MmcsProgram(
+            master_box="box1",
+            period_ns=100,
+            repetitions=1,
+            dac_boards=(board.model_copy(update={"channels": (board.channels[0],)}),),
+        )
+    with pytest.raises(PydanticValidationError, match="duplicate channels"):
+        MmcsProgram(
+            master_box="box1",
+            period_ns=100,
+            repetitions=1,
+            dac_boards=(
+                board.model_copy(update={"channels": (board.channels[0], board.channels[0])}),
+            ),
+        )
+    mismatched_q = board.channels[1].model_copy(
+        update={"waveforms": (DacWaveform(samples=np.zeros(16)),)}
+    )
+    with pytest.raises(PydanticValidationError, match="equal lengths"):
+        MmcsProgram(
+            master_box="box1",
+            period_ns=100,
+            repetitions=1,
+            dac_boards=(
+                board.model_copy(update={"channels": (board.channels[0], mismatched_q)}),
+            ),
+        )
+
+
+def test_dac_board_id_is_unique_and_fingerprint_covers_board_state():
+    program = make_program(adc_programs=())
+    board = program.dac_boards[0]
+    with pytest.raises(PydanticValidationError, match="Duplicate or empty DAC board"):
+        MmcsProgram(
+            master_box="box1",
+            period_ns=100,
+            repetitions=1,
+            dac_boards=(board, board),
+        )
+
+    changed_q = board.channels[1].model_copy(
+        update={"waveforms": (DacWaveform(samples=np.ones(8) * 0.1),)}
+    )
+    changed = MmcsProgram(
+        master_box="box1",
+        period_ns=100,
+        repetitions=1,
+        dac_boards=(board.model_copy(update={"channels": (board.channels[0], changed_q)}),),
+    )
+    assert changed.fingerprint() != program.fingerprint()
+
+
+def test_service_prepares_board_channels_then_configures_one_trigger_and_cleans_up():
+    backend = FakeMmcsBackend()
+    _, service = make_service(backend)
+    with service.connected():
+        with service.running(make_program(adc_programs=())) as run:
+            run.result(timeout_s=1)
+        names = [call[0] for call in backend.calls]
+
+    expected = [
+        "sys_stop_all_borad",
+        "sys_clear_all_level2_trigger_ram",
+        "da_clear_wave_ram",
+        "da_set_multi_waveform",
+        "da_set_multi_waveform",
+        "da_set_level2_trigger_ram",
+        "sys_set_level1_trigger",
+        "sys_run_level1_trigger",
+        "sys_wait_until_finish",
+        "sys_stop_all_borad",
+        "sys_clear_all_level2_trigger_ram",
+    ]
+    assert names[: len(expected)] == expected
+    assert names[: len(expected)].count("da_set_level2_trigger_ram") == 1
+
+
+def invalid_waveform_program():
+    waveform = DacWaveform(samples=np.zeros(7))
+    playlist = (PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),)
+    board = DacBoardProgram(
+        board_id="da",
+        triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
+        channels=tuple(
+            DacChannelProgram(
+                channel=channel,
+                waveforms=(waveform,),
+                playlist=playlist,
+                play_mode=DacPlayMode.END_WITH_ZERO,
+            )
+            for channel in DacChannel
+        ),
+    )
+    return make_program(dac_boards=(board,))
 
 
 def invalid_demodulation_program():

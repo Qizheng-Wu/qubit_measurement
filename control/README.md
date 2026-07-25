@@ -52,3 +52,39 @@ the connected/running service lifecycles.
 The script resolves and prints every effective value in dry-run mode. Verify
 the configured board sample rate, cabling, attenuation, and input limits before
 setting `RUN_HARDWARE = True`.
+
+## MMCS IQ upconversion
+
+DAC trigger RAM belongs to an IQ board group, so an `MmcsProgram` owns DAC
+resources as `DacBoardProgram` objects.  Each board program contains both I and
+Q channel programs and one shared trigger schedule.  The single-channel cyclic
+builder fills the unused companion channel with an equal-length zero waveform.
+
+For external single-sideband mixing, generate and schedule the IQ pair together:
+
+```python
+from control.domain.mmcs import IqCalibration, IqToneSpec, Sideband
+from control.services import build_iq_upconversion_program, generate_iq_tone
+
+tone = generate_iq_tone(IqToneSpec(
+    sample_rate_hz=2e9,
+    if_frequency_hz=20e6,
+    amplitude=0.02,
+    phase_rad=0.0,
+    minimum_samples=800,
+    sideband=Sideband.UPPER,
+    calibration=IqCalibration(),
+))
+program = build_iq_upconversion_program(
+    tone,
+    board_id="da_box1pcie1ch12",
+    master_box="box1",
+    run_duration_s=30.0,
+    period_ns=1_000_000,
+    start_trigger_ns=40,
+)
+```
+
+`Sideband.UPPER` follows the convention
+`RF = I*cos(LO) - Q*sin(LO)`.  Set `q_polarity=-1` in the calibration when the
+physical mixer or cabling reverses that convention.

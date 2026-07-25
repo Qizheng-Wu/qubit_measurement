@@ -56,13 +56,17 @@ class TriggerEvent(FrozenModel):
     command: TriggerCommand
 
 
-class DacProgram(FrozenModel):
-    board_id: str
+class DacChannelProgram(FrozenModel):
     channel: DacChannel
     waveforms: tuple[DacWaveform, ...]
     playlist: tuple[PlaylistEntry, ...]
     play_mode: DacPlayMode
+
+
+class DacBoardProgram(FrozenModel):
+    board_id: str
     triggers: tuple[TriggerEvent, ...]
+    channels: tuple[DacChannelProgram, ...]
 
 
 class DemodulationWeights(FrozenModel):
@@ -101,7 +105,7 @@ class MmcsProgram(FrozenModel):
     master_box: str
     period_ns: int
     repetitions: int
-    dac_programs: tuple[DacProgram, ...] = ()
+    dac_boards: tuple[DacBoardProgram, ...] = ()
     adc_programs: tuple[AdcProgram, ...] = ()
 
     @model_validator(mode="after")
@@ -112,33 +116,57 @@ class MmcsProgram(FrozenModel):
             raise ValueError("period_ns must be a positive multiple of 4")
         if self.repetitions < 1:
             raise ValueError("repetitions must be at least 1")
-        if not self.dac_programs and not self.adc_programs:
+        if not self.dac_boards and not self.adc_programs:
             raise ValueError("MMCS program cannot be empty")
 
-        channel_keys: set[tuple[str, DacChannel]] = set()
-        for dac in self.dac_programs:
-            key = (dac.board_id, dac.channel)
-            if not dac.board_id or key in channel_keys:
-                raise ValueError(f"Duplicate or empty DAC channel: {key!r}")
-            channel_keys.add(key)
-            if not dac.waveforms or not dac.playlist:
-                raise ValueError(f"DAC {key!r} requires waveforms and a playlist")
-            for waveform in dac.waveforms:
-                values = waveform.samples
-                if values.ndim != 1 or values.size == 0 or values.size % 8:
-                    raise ValueError("DAC waveforms must be non-empty 1-D arrays aligned to 8 samples")
-                if not np.all(np.isfinite(values)) or np.any(np.abs(values) > 1):
-                    raise ValueError("DAC waveform samples must be finite and within [-1, 1]")
-            for entry in dac.playlist:
-                if entry.trigger is not TriggerCommand.START:
-                    raise ValueError("MMCS v1 playlists only support START entries")
-                if not 0 <= entry.waveform_index < len(dac.waveforms):
-                    raise ValueError("Playlist waveform index is out of range")
-            _validate_triggers(dac.triggers, self.period_ns, adc=False)
-            if dac.play_mode is DacPlayMode.CYCLE and not any(
-                event.command is TriggerCommand.STOP for event in dac.triggers
-            ):
-                raise ValueError("Cyclic DAC playback requires a STOP trigger")
+        board_ids: set[str] = set()
+        for board in self.dac_boards:
+            if not board.board_id or board.board_id in board_ids:
+                raise ValueError(f"Duplicate or empty DAC board: {board.board_id!r}")
+            board_ids.add(board.board_id)
+            _validate_triggers(board.triggers, self.period_ns, adc=False)
+
+            channels = {channel.channel: channel for channel in board.channels}
+            if len(channels) != len(board.channels):
+                raise ValueError(f"DAC board {board.board_id!r} contains duplicate channels")
+            if set(channels) != {DacChannel.I, DacChannel.Q}:
+                raise ValueError(f"DAC board {board.board_id!r} must declare I and Q channels")
+
+            reference = channels[DacChannel.I]
+            for channel in board.channels:
+                key = (board.board_id, channel.channel)
+                if not channel.waveforms or not channel.playlist:
+                    raise ValueError(f"DAC {key!r} requires waveforms and a playlist")
+                for waveform in channel.waveforms:
+                    values = waveform.samples
+                    if values.ndim != 1 or values.size == 0 or values.size % 8:
+                        raise ValueError(
+                            "DAC waveforms must be non-empty 1-D arrays aligned to 8 samples"
+                        )
+                    if not np.all(np.isfinite(values)) or np.any(np.abs(values) > 1):
+                        raise ValueError("DAC waveform samples must be finite and within [-1, 1]")
+                for entry in channel.playlist:
+                    if entry.trigger is not TriggerCommand.START:
+                        raise ValueError("MMCS v1 playlists only support START entries")
+                    if not 0 <= entry.waveform_index < len(channel.waveforms):
+                        raise ValueError("Playlist waveform index is out of range")
+                if channel.play_mode is DacPlayMode.CYCLE and not any(
+                    event.command is TriggerCommand.STOP for event in board.triggers
+                ):
+                    raise ValueError("Cyclic DAC playback requires a STOP trigger")
+
+            for channel in board.channels:
+                if channel.play_mode is not reference.play_mode:
+                    raise ValueError("I and Q channels must use the same play mode")
+                if channel.playlist != reference.playlist:
+                    raise ValueError("I and Q channels must use the same playlist")
+                if len(channel.waveforms) != len(reference.waveforms) or any(
+                    waveform.samples.size != reference_waveform.samples.size
+                    for waveform, reference_waveform in zip(
+                        channel.waveforms, reference.waveforms, strict=True
+                    )
+                ):
+                    raise ValueError("Corresponding I and Q waveforms must have equal lengths")
 
         adc_ids: set[str] = set()
         for adc in self.adc_programs:
@@ -166,14 +194,14 @@ class MmcsProgram(FrozenModel):
     def fingerprint(self) -> str:
         digest = hashlib.sha256()
         digest.update(f"{self.master_box}|{self.period_ns}|{self.repetitions}".encode())
-        for program in self.dac_programs:
-            digest.update(
-                f"D|{program.board_id}|{program.channel.value}|{program.play_mode.value}".encode()
-            )
-            for waveform in program.waveforms:
-                digest.update(np.ascontiguousarray(waveform.samples).tobytes())
-            digest.update(repr(program.playlist).encode())
-            digest.update(repr(program.triggers).encode())
+        for board in self.dac_boards:
+            digest.update(f"D|{board.board_id}".encode())
+            digest.update(repr(board.triggers).encode())
+            for channel in sorted(board.channels, key=lambda item: item.channel.value):
+                digest.update(f"C|{channel.channel.value}|{channel.play_mode.value}".encode())
+                for waveform in channel.waveforms:
+                    digest.update(np.ascontiguousarray(waveform.samples).tobytes())
+                digest.update(repr(channel.playlist).encode())
         for program in self.adc_programs:
             digest.update(f"A|{program.board_id}|{program.sample_length}".encode())
             for weights in program.demodulations:

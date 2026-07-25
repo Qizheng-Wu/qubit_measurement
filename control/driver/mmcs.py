@@ -44,6 +44,11 @@ class MmcsHardwareDriver:
     def clear_all_trigger_ram(self) -> None:
         self.transport.call("sys_clear_all_level2_trigger_ram")
 
+    def clear_dac_waveforms(self, board_id: str) -> None:
+        """Reset both physical channels in one DAC IQ group to zero."""
+
+        self.transport.call("da_clear_wave_ram", name=board_id)
+
     def configure_level1_trigger(self, *, repetitions: int, period_ns: int) -> None:
         self.transport.call(
             "sys_set_level1_trigger", cycle_times=repetitions, cycle_period_ns=period_ns

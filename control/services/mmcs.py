@@ -55,36 +55,50 @@ class MmcsService(BaseInstrumentService):
 
     def _cleanup_after_error(self, exc: BaseException, master_box: str) -> None:
         try:
-            self.driver.stop_all(master_box, timeout_s=self.cleanup_timeout_s)
+            self._stop_and_clear(master_box)
         except Exception as cleanup_exc:
-            exc.add_note(f"MMCS stop after failure also failed: {cleanup_exc}")
+            exc.add_note(f"MMCS cleanup after failure also failed: {cleanup_exc}")
+        self._hardware_running = False
+
+    def _stop_and_clear(self, master_box: str) -> None:
+        stop_error: BaseException | None = None
+        try:
+            self.driver.stop_all(master_box, timeout_s=self.cleanup_timeout_s)
+        except BaseException as exc:
+            stop_error = exc
         try:
             self.driver.clear_all_trigger_ram()
-        except Exception as cleanup_exc:
-            exc.add_note(f"MMCS trigger cleanup after failure also failed: {cleanup_exc}")
-        self._hardware_running = False
+        except BaseException as clear_exc:
+            if stop_error is not None:
+                stop_error.add_note(f"Clearing MMCS trigger RAM also failed: {clear_exc}")
+            else:
+                raise
+        if stop_error is not None:
+            raise stop_error
 
     def _prepare(self, program: MmcsProgram) -> None:
         try:
-            self.driver.stop_all(program.master_box, timeout_s=self.cleanup_timeout_s)
-            self.driver.clear_all_trigger_ram()
+            self._stop_and_clear(program.master_box)
             for adc in program.adc_programs:
                 self.driver.clear_adc_data(adc.board_id)
-            for dac in program.dac_programs:
-                self.driver.upload_dac_waveforms(
-                    board_id=dac.board_id,
-                    channel=dac.channel.value,
-                    play_mode=dac.play_mode.value,
-                    waveforms=[waveform.samples for waveform in dac.waveforms],
-                    playlist=[
-                        {"trigger": int(entry.trigger), "wave_idx": entry.waveform_index}
-                        for entry in dac.playlist
-                    ],
-                )
+            for board in program.dac_boards:
+                self.driver.clear_dac_waveforms(board.board_id)
+                for channel in sorted(board.channels, key=lambda item: item.channel.value):
+                    self.driver.upload_dac_waveforms(
+                        board_id=board.board_id,
+                        channel=channel.channel.value,
+                        play_mode=channel.play_mode.value,
+                        waveforms=[waveform.samples for waveform in channel.waveforms],
+                        playlist=[
+                            {"trigger": int(entry.trigger), "wave_idx": entry.waveform_index}
+                            for entry in channel.playlist
+                        ],
+                    )
+            for board in program.dac_boards:
                 self.driver.configure_dac_triggers(
-                    board_id=dac.board_id,
-                    timestamps_ns=[event.time_ns for event in dac.triggers],
-                    commands=[int(event.command) for event in dac.triggers],
+                    board_id=board.board_id,
+                    timestamps_ns=[event.time_ns for event in board.triggers],
+                    commands=[int(event.command) for event in board.triggers],
                 )
             for adc in program.adc_programs:
                 self.driver.configure_adc_sampling(
@@ -147,10 +161,10 @@ class MmcsService(BaseInstrumentService):
                     q_average=arrays[3],
                     state_flags=arrays[4],
                 )
+            self._stop(program)
         except BaseException as exc:
             self._cleanup_after_error(exc, program.master_box)
             raise
-        self._hardware_running = False
         return MmcsResult(
             iq_by_adc=results,
             period_ns=program.period_ns,
@@ -160,8 +174,10 @@ class MmcsService(BaseInstrumentService):
         )
 
     def _stop(self, program: MmcsProgram) -> None:
-        self.driver.stop_all(program.master_box, timeout_s=self.cleanup_timeout_s)
-        self._hardware_running = False
+        try:
+            self._stop_and_clear(program.master_box)
+        finally:
+            self._hardware_running = False
 
     @contextmanager
     def running(self, program: MmcsProgram) -> Iterator[MmcsRun]:

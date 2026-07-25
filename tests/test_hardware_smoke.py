@@ -11,7 +11,8 @@ from control.domain.mmcs import (
     AdcProgram,
     DacChannel,
     DacPlayMode,
-    DacProgram,
+    DacBoardProgram,
+    DacChannelProgram,
     DacWaveform,
     DemodulationWeights,
     MmcsProgram,
@@ -88,14 +89,21 @@ def test_mmcs_zero_waveform_and_iq():
         master_box="box1",
         period_ns=10_000,
         repetitions=1,
-        dac_programs=(
-            DacProgram(
+        dac_boards=(
+            DacBoardProgram(
                 board_id=dac_id,
-                channel=DacChannel.I,
-                waveforms=(DacWaveform(samples=np.zeros(8)),),
-                playlist=(PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),),
-                play_mode=DacPlayMode.END_WITH_ZERO,
                 triggers=(TriggerEvent(time_ns=40, command=TriggerCommand.START),),
+                channels=tuple(
+                    DacChannelProgram(
+                        channel=channel,
+                        waveforms=(DacWaveform(samples=np.zeros(8)),),
+                        playlist=(
+                            PlaylistEntry(waveform_index=0, trigger=TriggerCommand.START),
+                        ),
+                        play_mode=DacPlayMode.END_WITH_ZERO,
+                    )
+                    for channel in DacChannel
+                ),
             ),
         ),
         adc_programs=(
