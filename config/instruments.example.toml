@@ -23,6 +23,13 @@ box1 = "192.168.4.8"
 [instruments.mmcs.dac_boards.da_box1pcie2ch12]
 sample_rate_hz = 500e6
 
+[instruments.mmcs.signal_paths.qubit_xy_q1]
+dac_board_id = "da_box1pcie2ch12"
+q_over_i_gain = 1.0
+i_offset = 0.0
+q_offset = 0.0
+q_phase_correction_rad = 0.0
+
 [defaults.spectrum_sweep]
 rbw_span_ratio = 0.01
 input_attenuation_db = 20.0

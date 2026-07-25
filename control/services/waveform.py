@@ -56,12 +56,11 @@ def generate_iq_tone(spec: IqToneSpec) -> GeneratedIqTone:
     )
     calibration = spec.calibration
     sideband_sign = 1 if spec.sideband is Sideband.UPPER else -1
-    i_samples = calibration.i_offset + spec.amplitude * calibration.i_gain * np.cos(phase)
+    i_samples = calibration.i_offset + spec.amplitude * np.cos(phase)
     q_samples = (
         calibration.q_offset
         + spec.amplitude
-        * calibration.q_gain
-        * calibration.q_polarity
+        * calibration.q_over_i_gain
         * sideband_sign
         * np.sin(phase + calibration.q_phase_correction_rad)
     )

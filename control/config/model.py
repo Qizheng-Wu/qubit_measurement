@@ -38,19 +38,35 @@ class MmcsDacBoardConfig(FrozenModel):
     sample_rate_hz: PositiveFloat
 
 
+class MmcsSignalPathConfig(FrozenModel):
+    dac_board_id: Annotated[str, Field(min_length=1)]
+    q_over_i_gain: PositiveFloat
+    i_offset: Annotated[float, Field(ge=-1, le=1, allow_inf_nan=False)]
+    q_offset: Annotated[float, Field(ge=-1, le=1, allow_inf_nan=False)]
+    q_phase_correction_rad: Annotated[float, Field(allow_inf_nan=False)]
+
+
 class MmcsDeviceConfig(FrozenModel):
     type: Literal["mmcs"]
     boxes: Mapping[str, Annotated[str, Field(min_length=1)]]
     dac_boards: Mapping[str, MmcsDacBoardConfig]
+    signal_paths: Mapping[str, MmcsSignalPathConfig]
 
     @model_validator(mode="after")
     def freeze_inventory(self) -> "MmcsDeviceConfig":
-        if not self.boxes or not self.dac_boards:
-            raise ValueError("MMCS boxes and dac_boards must be non-empty")
-        if any(not name.strip() for name in (*self.boxes, *self.dac_boards)):
-            raise ValueError("MMCS box and DAC board names must be non-empty")
+        if not self.boxes or not self.dac_boards or not self.signal_paths:
+            raise ValueError("MMCS boxes, dac_boards, and signal_paths must be non-empty")
+        if any(not name.strip() for name in (*self.boxes, *self.dac_boards, *self.signal_paths)):
+            raise ValueError("MMCS box, DAC board, and signal path names must be non-empty")
+        unknown_boards = {
+            path.dac_board_id for path in self.signal_paths.values()
+            if path.dac_board_id not in self.dac_boards
+        }
+        if unknown_boards:
+            raise ValueError(f"Signal paths reference unknown DAC boards: {sorted(unknown_boards)!r}")
         object.__setattr__(self, "boxes", MappingProxyType(dict(self.boxes)))
         object.__setattr__(self, "dac_boards", MappingProxyType(dict(self.dac_boards)))
+        object.__setattr__(self, "signal_paths", MappingProxyType(dict(self.signal_paths)))
         return self
 
     def require_dac_board(self, board_id: str) -> MmcsDacBoardConfig:
@@ -60,6 +76,15 @@ class MmcsDeviceConfig(FrozenModel):
             available = ", ".join(sorted(self.dac_boards))
             raise ConfigurationError(
                 f"MMCS DAC board {board_id!r} is not configured; available: {available}"
+            ) from exc
+
+    def require_signal_path(self, name: str) -> MmcsSignalPathConfig:
+        try:
+            return self.signal_paths[name]
+        except KeyError as exc:
+            available = ", ".join(sorted(self.signal_paths))
+            raise ConfigurationError(
+                f"MMCS signal path {name!r} is not configured; available: {available}"
             ) from exc
 
 

@@ -10,6 +10,7 @@ from control.config import (
     MmcsDacBoardConfig,
     MmcsDeviceConfig,
     MmcsExecutionDefaults,
+    MmcsSignalPathConfig,
     SpectrumAnalyzerDeviceConfig,
     SpectrumSweepDefaults,
     VisaDeviceConfig,
@@ -41,6 +42,13 @@ box2 = "192.0.2.2"
 
 [instruments.mmcs.dac_boards.da_box1pcie1ch12]
 sample_rate_hz = 2e9
+
+[instruments.mmcs.signal_paths.qubit_xy_q1]
+dac_board_id = "da_box1pcie1ch12"
+q_over_i_gain = 1.02
+i_offset = 0.01
+q_offset = -0.02
+q_phase_correction_rad = 0.03
 
 [defaults.vna_sweep]
 points = 1001
@@ -79,6 +87,7 @@ def write_config(tmp_path, content=VALID_CONFIG):
         SpectrumAnalyzerDeviceConfig,
         MmcsDacBoardConfig,
         MmcsDeviceConfig,
+        MmcsSignalPathConfig,
         VnaSweepDefaults,
         SpectrumSweepDefaults,
         MmcsExecutionDefaults,
@@ -97,6 +106,12 @@ def test_load_v3_complete_config_and_immutable_hardware_inventory(tmp_path):
     assert config.schema_version == 3
     assert mmcs.boxes == {"box1": "192.0.2.1", "box2": "192.0.2.2"}
     assert mmcs.require_dac_board("da_box1pcie1ch12").sample_rate_hz == 2e9
+    signal_path = mmcs.require_signal_path("qubit_xy_q1")
+    assert signal_path.dac_board_id == "da_box1pcie1ch12"
+    assert signal_path.q_over_i_gain == 1.02
+    assert signal_path.i_offset == 0.01
+    assert signal_path.q_offset == -0.02
+    assert signal_path.q_phase_correction_rad == 0.03
     assert config.defaults.spectrum_sweep.points == 501
     assert config.defaults.spectrum_sweep.rbw_span_ratio == 0.01
     assert config.defaults.mmcs_awg.period_ns == 1_000_000
@@ -150,6 +165,21 @@ def test_unknown_dac_board_is_configuration_error(tmp_path):
     mmcs = load_control_config(write_config(tmp_path)).require("mmcs", MmcsDeviceConfig)
     with pytest.raises(ConfigurationError, match="not configured"):
         mmcs.require_dac_board("missing")
+
+
+def test_unknown_signal_path_is_configuration_error(tmp_path):
+    mmcs = load_control_config(write_config(tmp_path)).require("mmcs", MmcsDeviceConfig)
+    with pytest.raises(ConfigurationError, match="not configured"):
+        mmcs.require_signal_path("missing")
+
+
+def test_signal_path_cannot_reference_unknown_board(tmp_path):
+    content = VALID_CONFIG.replace(
+        'dac_board_id = "da_box1pcie1ch12"',
+        'dac_board_id = "missing"',
+    )
+    with pytest.raises(ConfigurationError, match="unknown DAC boards"):
+        load_control_config(write_config(tmp_path, content))
 
 
 @pytest.mark.parametrize(

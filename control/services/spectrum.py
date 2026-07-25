@@ -9,6 +9,7 @@ from typing import Iterator
 import numpy as np
 
 from control.core.exceptions import AcquisitionError, InstrumentStateError, ValidationError
+from control.domain.power import ScalarPowerMeasurementConfig, ScalarPowerResult
 from control.domain.sweep import SpectrumSweepConfig
 from control.domain.trace import SpectrumTrace
 from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
@@ -32,6 +33,36 @@ class SpectrumAnalyzerRun:
         self._service._require_active_run(self)
         self._result = self._service._finish(self._config, timeout_s=timeout_s)
         return self._result
+
+
+class ScalarPowerSession:
+    def __init__(
+        self,
+        service: "SpectrumAnalyzerService",
+        config: ScalarPowerMeasurementConfig,
+    ) -> None:
+        self._service = service
+        self.config = config
+
+    def measure(self, *, repetitions: int = 3, timeout_s: float) -> ScalarPowerResult:
+        self._service._require_active_run(self)
+        if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
+            raise ValidationError("repetitions must be a positive integer")
+        if timeout_s <= 0:
+            raise ValidationError("timeout_s must be positive")
+        readings: list[float] = []
+        for _ in range(repetitions):
+            self._service.driver.trigger()
+            self._service._hardware_running = True
+            self._service.driver.wait_operation_complete(timeout_s)
+            readings.append(self._service.driver.fetch_marker_power_dbm(self.config.marker))
+            self._service._hardware_running = False
+        return ScalarPowerResult(
+            frequency_hz=self.config.frequency_hz,
+            power_dbm=float(np.median(readings)),
+            readings_dbm=tuple(readings),
+            acquired_at=datetime.now(timezone.utc),
+        )
 
 
 class SpectrumAnalyzerService(BaseInstrumentService):
@@ -79,6 +110,63 @@ class SpectrumAnalyzerService(BaseInstrumentService):
             instrument=self.driver.identity,
             acquired_at=datetime.now(timezone.utc),
         )
+
+    def _configure_scalar_power(self, config: ScalarPowerMeasurementConfig) -> None:
+        self.driver.set_center_hz(config.frequency_hz)
+        self.driver.set_span_hz(config.span_hz)
+        self.driver.set_points(config.points)
+        self.driver.set_resolution_bandwidth_hz(config.resolution_bandwidth_hz)
+        self.driver.set_input_attenuation_db(config.input_attenuation_db)
+        self.driver.set_continuous(False)
+        self.driver.set_marker_enabled(config.marker, True)
+        self.driver.set_marker_frequency_hz(config.marker, config.frequency_hz)
+
+    @contextmanager
+    def scalar_power_session(
+        self, config: ScalarPowerMeasurementConfig
+    ) -> Iterator[ScalarPowerSession]:
+        self._require_connected()
+        if self._active_run is not None:
+            raise InstrumentStateError("Spectrum analyzer is already running")
+        session = ScalarPowerSession(self, config)
+        try:
+            self._configure_scalar_power(config)
+        except BaseException as exc:
+            try:
+                self.driver.abort()
+            except Exception as cleanup_exc:
+                exc.add_note(f"Spectrum analyzer abort also failed: {cleanup_exc}")
+            raise
+        self._activate_run(session)
+        primary_error: BaseException | None = None
+        try:
+            yield session
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            cleanup_error: Exception | None = None
+            for cleanup in (
+                self.driver.abort,
+                lambda: self.driver.set_continuous(False),
+                lambda: self.driver.set_marker_enabled(config.marker, False),
+            ):
+                try:
+                    cleanup()
+                except Exception as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+                    else:
+                        cleanup_error.add_note(f"Additional scalar cleanup failed: {exc}")
+            self._hardware_running = False
+            self._deactivate_run(session)
+            if cleanup_error is not None:
+                if primary_error is not None:
+                    primary_error.add_note(f"Scalar power cleanup also failed: {cleanup_error}")
+                else:
+                    raise AcquisitionError(
+                        "Scalar power session failed to restore analyzer state"
+                    ) from cleanup_error
 
     @contextmanager
     def running(self, config: SpectrumSweepConfig) -> Iterator[SpectrumAnalyzerRun]:

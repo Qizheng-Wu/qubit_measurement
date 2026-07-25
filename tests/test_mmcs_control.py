@@ -306,16 +306,14 @@ def test_generate_iq_tone_is_shared_periodic_pair_and_sideband_flips_q_only():
 
 def test_generate_iq_tone_applies_calibration_formula():
     calibration = IqCalibration(
-        i_gain=2.0,
-        q_gain=3.0,
+        q_over_i_gain=1.5,
         i_offset=0.1,
         q_offset=-0.2,
         q_phase_correction_rad=np.pi / 2,
-        q_polarity=-1,
     )
     tone = generate_iq_tone(iq_tone_spec(amplitude=0.1, calibration=calibration))
-    assert tone.i_waveform.samples[0] == pytest.approx(0.3)
-    assert tone.q_waveform.samples[0] == pytest.approx(-0.5)
+    assert tone.i_waveform.samples[0] == pytest.approx(0.2)
+    assert tone.q_waveform.samples[0] == pytest.approx(-0.05)
 
 
 def test_generate_iq_tone_rejects_calibrated_overflow():
@@ -323,7 +321,7 @@ def test_generate_iq_tone_rejects_calibrated_overflow():
         generate_iq_tone(
             iq_tone_spec(
                 amplitude=1.0,
-                calibration=IqCalibration(i_gain=1.0, i_offset=0.1),
+                calibration=IqCalibration(i_offset=0.1),
             )
         )
 
@@ -331,9 +329,8 @@ def test_generate_iq_tone_rejects_calibrated_overflow():
 @pytest.mark.parametrize(
     "calibration",
     [
-        {"i_gain": 0.0},
-        {"q_gain": -1.0},
-        {"q_polarity": 0},
+        {"q_over_i_gain": 0.0},
+        {"q_over_i_gain": -1.0},
         {"i_offset": 1.1},
         {"q_phase_correction_rad": np.nan},
     ],

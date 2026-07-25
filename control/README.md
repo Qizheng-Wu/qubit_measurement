@@ -85,6 +85,20 @@ program = build_iq_upconversion_program(
 )
 ```
 
-`Sideband.UPPER` follows the convention
-`RF = I*cos(LO) - Q*sin(LO)`.  Set `q_polarity=-1` in the calibration when the
-physical mixer or cabling reverses that convention.
+`Sideband.UPPER` follows the convention `RF = I*cos(LO) - Q*sin(LO)`. The four
+calibration parameters are the Q/I amplitude ratio, I and Q DC offsets, and Q
+phase correction. They are stored under the manually selected MMCS signal path
+in TOML; normal experiments never load a calibration from the history database.
+
+## Automatic IQ calibration
+
+`experiment/mmcs_iq_auto_calibration.py` is dry-run first. It prints the TOML
+initial values, LO/target/image frequencies, optimization bounds, maximum
+marker-sweep count, and SQLite path. Hardware mode minimizes LO leakage with the
+two offsets, then minimizes the image sideband with Q/I gain and Q phase.
+
+The analyzer uses a narrow sweep and reads only `CALC:MARK:Y?`; it does not
+download a trace for each candidate. Each candidate is measured three times and
+the median is persisted. SQLAlchemy stores runs and the complete evaluation
+trajectory in `data/calibration.sqlite3`. A completed run prints a TOML snippet,
+but never edits or activates the configuration automatically.

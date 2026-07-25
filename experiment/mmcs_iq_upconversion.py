@@ -12,11 +12,20 @@ RUN_HARDWARE = False
 def main() -> int:
     config = load_config()
     mmcs_name = "mmcs"
-    board_id = "da_box1pcie1ch12"
+    signal_path_name = "qubit_xy_q1"
     master_box = "box1"
     run_duration_s = 30.0
-    board = config.require(mmcs_name, MmcsDeviceConfig).require_dac_board(board_id)
+    mmcs_config = config.require(mmcs_name, MmcsDeviceConfig)
+    signal_path = mmcs_config.require_signal_path(signal_path_name)
+    board_id = signal_path.dac_board_id
+    board = mmcs_config.require_dac_board(board_id)
     defaults = config.defaults.mmcs_awg
+    calibration = IqCalibration(
+        q_over_i_gain=signal_path.q_over_i_gain,
+        i_offset=signal_path.i_offset,
+        q_offset=signal_path.q_offset,
+        q_phase_correction_rad=signal_path.q_phase_correction_rad,
+    )
 
     tone = generate_iq_tone(
         IqToneSpec(
@@ -26,7 +35,7 @@ def main() -> int:
             phase_rad=0.0,
             minimum_samples=defaults.minimum_waveform_samples,
             sideband=Sideband.UPPER,
-            calibration=IqCalibration(),
+            calibration=calibration,
         )
     )
     program = build_iq_upconversion_program(
@@ -38,7 +47,8 @@ def main() -> int:
         start_trigger_ns=defaults.start_trigger_ns,
     )
     print(
-        f"board={board_id}, sideband={tone.spec.sideband.value}, "
+        f"signal_path={signal_path_name}, board={board_id}, "
+        f"sideband={tone.spec.sideband.value}, "
         f"requested_IF={tone.spec.if_frequency_hz / 1e6:.6f} MHz, "
         f"actual_IF={tone.actual_if_frequency_hz / 1e6:.6f} MHz, "
         f"samples={tone.i_waveform.samples.size}"

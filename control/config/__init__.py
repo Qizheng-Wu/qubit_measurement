@@ -9,6 +9,7 @@ from .model import (
     MmcsDacBoardConfig,
     MmcsDeviceConfig,
     MmcsExecutionDefaults,
+    MmcsSignalPathConfig,
     SpectrumAnalyzerDeviceConfig,
     SpectrumSweepDefaults,
     VisaDeviceConfig,

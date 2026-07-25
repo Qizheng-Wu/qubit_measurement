@@ -60,6 +60,28 @@ class SpectrumAnalyzerDriver(ScpiInstrumentDriver):
     def set_continuous(self, enabled: bool) -> None:
         self.transport.write(f":INIT:CONT {int(enabled)}")
 
+    @staticmethod
+    def _validate_marker(marker: int) -> None:
+        if not isinstance(marker, int) or isinstance(marker, bool) or marker not in range(1, 17):
+            raise ValidationError("Spectrum-analyzer marker must be an integer in [1, 16]")
+
+    def set_marker_enabled(self, marker: int, enabled: bool) -> None:
+        self._validate_marker(marker)
+        self.transport.write(f":CALC:MARK{marker}:STAT {int(enabled)}")
+
+    def set_marker_frequency_hz(self, marker: int, frequency_hz: float) -> None:
+        self._validate_marker(marker)
+        if not np.isfinite(frequency_hz) or frequency_hz <= 0:
+            raise ValidationError("Marker frequency must be finite and positive")
+        self.transport.write(f":CALC:MARK{marker}:X {frequency_hz:.12g} Hz")
+
+    def fetch_marker_power_dbm(self, marker: int) -> float:
+        self._validate_marker(marker)
+        power = self.transport.query_float(f":CALC:MARK{marker}:Y?")
+        if not np.isfinite(power):
+            raise ProtocolError("Spectrum analyzer returned non-finite marker power")
+        return float(power)
+
     def trigger(self) -> None:
         self.transport.write(":INIT:IMM")
 

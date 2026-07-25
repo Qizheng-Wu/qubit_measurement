@@ -12,6 +12,7 @@ from control.core.exceptions import (
     TransportTimeoutError,
 )
 from control.domain.sweep import SpectrumSweepConfig, VnaSweepConfig
+from control.domain.power import ScalarPowerMeasurementConfig
 from control.driver.spectrum_analyzer import SpectrumAnalyzerDriver
 from control.driver.vna import VnaDriver
 from control.services import SpectrumAnalyzerService, VnaService
@@ -40,6 +41,8 @@ class ScriptedVisaTransport:
     def query(self, command):
         self.commands.append(("query", command))
         response = self.query_responses[command]
+        if isinstance(response, list):
+            response = response.pop(0)
         if isinstance(response, Exception):
             raise response
         return str(response)
@@ -185,3 +188,76 @@ def test_unconsumed_spectrum_run_aborts():
         with service.running(config):
             pass
         assert ("write", ":ABOR") in transport.commands
+
+
+def test_scalar_marker_session_configures_once_and_uses_median():
+    transport = ScriptedVisaTransport(
+        query={
+            "*IDN?": "Rohde&Schwarz,FPL1602,SN3,1",
+            "*OPC?": ["1"] * 6,
+            ":CALC:MARK1:Y?": [-80, -60, -70, -50, -40, -45],
+        }
+    )
+    service = SpectrumAnalyzerService(SpectrumAnalyzerDriver(transport))
+    config = ScalarPowerMeasurementConfig(
+        frequency_hz=5e9,
+        span_hz=2e6,
+        points=201,
+        resolution_bandwidth_hz=10e3,
+        input_attenuation_db=20,
+    )
+
+    with service.connected():
+        with service.scalar_power_session(config) as meter:
+            first = meter.measure(repetitions=3, timeout_s=2)
+            second = meter.measure(repetitions=3, timeout_s=2)
+
+    assert first.readings_dbm == (-80.0, -60.0, -70.0)
+    assert first.power_dbm == -70
+    assert second.power_dbm == -45
+    assert transport.commands.count(("write", "FREQ:CENT 5000000000 Hz")) == 1
+    assert transport.commands.count(("write", ":INIT:IMM")) == 6
+    assert ("write", ":CALC:MARK1:X 5000000000 Hz") in transport.commands
+    assert transport.commands[-5:] == [
+        ("write", ":ABOR"),
+        ("write", ":INIT:CONT 0"),
+        ("write", ":CALC:MARK1:STAT 0"),
+        ("write", ":ABOR"),
+        ("write", ":INIT:CONT 0"),
+    ]
+
+
+def test_scalar_marker_timeout_still_cleans_up():
+    transport = ScriptedVisaTransport(
+        query={
+            "*IDN?": "Rohde&Schwarz,FPL1602,SN3,1",
+            "*OPC?": TransportTimeoutError("timeout"),
+        }
+    )
+    service = SpectrumAnalyzerService(SpectrumAnalyzerDriver(transport))
+    config = ScalarPowerMeasurementConfig(
+        frequency_hz=5e9,
+        span_hz=2e6,
+        points=201,
+        resolution_bandwidth_hz=10e3,
+        input_attenuation_db=20,
+    )
+
+    with service.connected():
+        with pytest.raises(TransportTimeoutError):
+            with service.scalar_power_session(config) as meter:
+                meter.measure(timeout_s=1)
+    assert ("write", ":ABOR") in transport.commands
+    marker_off = transport.commands.index(("write", ":CALC:MARK1:STAT 0"))
+    assert transport.commands[marker_off - 2:marker_off + 1] == [
+        ("write", ":ABOR"),
+        ("write", ":INIT:CONT 0"),
+        ("write", ":CALC:MARK1:STAT 0"),
+    ]
+
+
+def test_marker_driver_rejects_nonfinite_power():
+    transport = ScriptedVisaTransport(query={":CALC:MARK1:Y?": "nan"})
+    driver = SpectrumAnalyzerDriver(transport)
+    with pytest.raises(ProtocolError, match="non-finite"):
+        driver.fetch_marker_power_dbm(1)

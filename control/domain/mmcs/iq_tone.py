@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import Field, model_validator
 
@@ -18,12 +18,10 @@ class Sideband(str, Enum):
 
 
 class IqCalibration(FrozenModel):
-    i_gain: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 1.0
-    q_gain: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 1.0
+    q_over_i_gain: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 1.0
     i_offset: Annotated[float, Field(ge=-1, le=1, allow_inf_nan=False)] = 0.0
     q_offset: Annotated[float, Field(ge=-1, le=1, allow_inf_nan=False)] = 0.0
     q_phase_correction_rad: Annotated[float, Field(allow_inf_nan=False)] = 0.0
-    q_polarity: Literal[-1, 1] = 1
 
 
 class IqToneSpec(FrozenModel):

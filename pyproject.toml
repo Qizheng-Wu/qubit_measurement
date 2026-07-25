@@ -25,6 +25,7 @@ dependencies = [
   "scipy-stubs~=1.17.1",
   "pydantic>=2.13.4",
   "mmcs-driver",
+  "sqlalchemy>=2.0,<3",
 ]
 requires-python = ">=3.11"
 readme = "readme.md"
