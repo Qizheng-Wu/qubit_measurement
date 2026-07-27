@@ -45,7 +45,6 @@ start_trigger_ns = 40
 safety_margin_s = 5.0
 
 [defaults.vna_sweep]
-points = 1001
 bandwidth_hz = 1e3
 averages = 1
 acquisition_timeout_s = 30.0
