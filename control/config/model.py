@@ -89,14 +89,12 @@ class MmcsDeviceConfig(FrozenModel):
 
 
 class VnaSweepDefaults(FrozenModel):
-    points: Annotated[int, Field(ge=2)]
     bandwidth_hz: PositiveFloat
     averages: Annotated[int, Field(ge=1)]
     acquisition_timeout_s: PositiveFloat
 
 
 class SpectrumSweepDefaults(FrozenModel):
-    points: Annotated[int, Field(ge=2)]
     rbw_span_ratio: PositiveFloat
     input_attenuation_db: NonNegativeFloat
     acquisition_timeout_s: PositiveFloat
