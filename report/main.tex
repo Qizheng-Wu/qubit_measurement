@@ -1,0 +1,356 @@
+\documentclass[UTF8,zihao=-4,a4paper]{ctexart}
+
+\usepackage[left=2.25cm,right=2.25cm,top=2.15cm,bottom=2.15cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning,shapes.geometric}
+\usepackage{hyperref}
+\usepackage{csquotes}
+\usepackage[backend=biber,style=numeric,sorting=none]{biblatex}
+\addbibresource{references.bib}
+
+\definecolor{mainblue}{HTML}{2563A6}
+\definecolor{lightblue}{HTML}{EAF2FA}
+\definecolor{accentorange}{HTML}{D97706}
+\definecolor{softgray}{HTML}{F3F4F6}
+\definecolor{codegreen}{HTML}{287D3C}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=mainblue,
+  citecolor=mainblue,
+  urlcolor=mainblue,
+  pdfauthor={作者姓名},
+  pdftitle={面向超导量子测控的仪器自动化与 IQ 混频校准程序设计}
+}
+
+\lstdefinestyle{pythonstyle}{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{mainblue}\bfseries,
+  commentstyle=\color{codegreen},
+  stringstyle=\color{accentorange},
+  backgroundcolor=\color{softgray},
+  frame=single,
+  rulecolor=\color{black!15},
+  numbers=left,
+  numberstyle=\tiny\color{black!55},
+  numbersep=7pt,
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+  xleftmargin=1.6em,
+  framexleftmargin=1.2em,
+  aboveskip=0.6em,
+  belowskip=0.6em
+}
+\lstset{style=pythonstyle}
+
+\newcommand{\reportauthor}{作者姓名（待填写）}
+\newcommand{\studentid}{学号（待填写）}
+\newcommand{\university}{学校名称（待填写）}
+\newcommand{\laboratory}{量子计算实验室（待填写）}
+\newcommand{\advisor}{指导教师（待填写）}
+\newcommand{\projectdate}{2026年8月}
+
+\title{\bfseries\LARGE 面向超导量子测控的仪器自动化\\[0.25em]
+与 IQ 混频校准程序设计}
+\author{\reportauthor\quad \studentid\\
+\university\quad \laboratory\\
+指导教师：\advisor}
+\date{\projectdate}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+超导量子计算实验需要协调矢量网络分析仪、频谱分析仪和多通道测控系统等设备。
+若直接在实验脚本中调用不同厂商接口，参数、仪器状态和异常清理逻辑会彼此耦合，
+难以保证实验的可重复性与安全性。本实训围绕三个问题开展工作：如何统一管理异构仪器，
+如何由数字 I/Q 波形产生目标微波边带，以及如何自动抑制 IQ 混频器的本振泄漏与镜像边带。
+为此，我实现了配置、传输、驱动、领域模型、服务和实验脚本分层的 Python 控制程序；
+设计了满足采样对齐、奈奎斯特约束和同步触发要求的 IQ 波形与 MMCS 程序模型；
+并实现了以频谱仪测量为反馈的两阶段有界优化校准流程及 SQLite 轨迹记录。
+当前软件流程和离线测试已基本完成，但尚无新版自动校准的正式硬件结果，
+因此本文重点总结物理问题与程序设计，不报告未经测量的抑制度。
+
+\noindent\textbf{关键词：}超导量子计算；仪器自动化；IQ 混频；单边带上变频；自动校准
+\end{abstract}
+
+\section{引言：从实验目标到自动化控制}
+
+超导量子比特通常由微波脉冲操控，并通过与其耦合的谐振腔完成读出。
+一条实际测控链路不仅包含量子芯片，还包含波形产生、微波上变频、信号采集与频谱分析等环节。
+相关综述指出，微波控制和色散读出是超导量子处理器的基础工程组成部分
+\cite{krantz2019,blais2021}。当实验从单次手工调试发展为参数扫描和自动校准时，
+控制软件必须同时表达物理意图、硬件约束与资源生命周期。
+
+本项目最初面对的是三个相互关联的问题。第一，VNA、频谱仪和 MMCS 的通信协议与接口不同，
+一次性脚本难以复用，并可能在异常后留下射频输出或未关闭的连接。第二，MMCS 的 DAC 产生的是
+中频波形，而量子比特控制需要 GHz 频段的微波，必须借助正交混频实现可选边带的上变频。
+第三，实际 IQ 通道的偏置、增益和相位并不理想，会在频谱中形成 LO 泄漏和镜像边带，
+人工反复调参效率低且不可追溯。下文对每个问题都按照“问题---原理---实现---验证”的顺序展开。
+
+\section{问题一：如何实现可靠的仪器自动化控制}
+
+\subsection{问题与实验约束}
+
+项目包含两类通信路径：VNA 和频谱仪通过 VISA 资源及 SCPI 指令工作，MMCS 则调用厂商提供的
+网络驱动。VISA 的作用是抽象 USB、TCP/IP、GPIB 等底层接口，PyVISA 在 Python 中提供资源管理、
+读写和查询接口\cite{grecco2023}。但是，仅把所有指令依次写进一个脚本仍然存在三类风险：
+
+\begin{enumerate}
+  \item 仪器地址、终止符、扫频带宽等参数散落在程序中，更换连接或实验条件时容易遗漏；
+  \item 连接、配置、触发、等待、取数和复位交织在一起，难以确定当前仪器状态；
+  \item 超时或用户中断可能跳过清理步骤，使连续扫描、射频输出或 MMCS 触发继续运行。
+\end{enumerate}
+
+这些问题会直接影响测量。以 VNA 扫频为例，中频带宽越窄，通常噪声越低但扫描越慢；平均次数
+提高可改善稳定性，却同时增加等待时间。频谱仪的分辨率带宽、输入衰减和采样点数也决定能否
+分辨窄带杂散并保护输入端。因此，软件中的参数校验和状态恢复不是附加功能，而是保证物理实验
+可重复性的组成部分。
+
+\subsection{分层设计与生命周期}
+
+为隔离上述职责，程序采用图\ref{fig:architecture}所示的分层结构。实验脚本只描述本次运行的
+物理参数；服务层管理连接与运行状态；驱动层把测量操作翻译为具体仪器命令；传输层负责 VISA
+或厂商 API。配置和领域模型横跨这些层，在连接硬件前完成参数解析与约束检查。
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{0.94\linewidth}{!}{\input{figures/architecture.tex}}
+  \caption{控制程序的分层结构。向下箭头表示调用，虚线表示配置和领域模型提供约束。}
+  \label{fig:architecture}
+\end{figure}
+
+硬件清单与工程默认值集中保存在 TOML 文件中。其中，仪器地址属于连接事实，DAC 采样率属于
+板卡硬件事实，而扫频带宽、超时和波形最小长度属于可共享的工程策略。实验代码只提供起止频率、
+功率、目标信号路径等物理意图，再由解析函数生成完整且不可变的运行配置。领域模型还会检查
+采样率为正、幅度有限、触发时刻按 $4\,\mathrm{ns}$ 对齐、信号路径引用已登记板卡等条件。
+这种做法可在打开仪器之前暴露配置错误。
+
+运行阶段使用上下文管理器限定资源的有效范围。下面的代码是 MMCS 与频谱仪同时工作的核心结构：
+
+\begin{lstlisting}[caption={多仪器运行及确定性清理},label={lst:lifecycle}]
+def run_experiment(mmcs, spectrum, plan):
+    with mmcs.connected(), spectrum.connected():
+        with mmcs.running(plan.mmcs_program):
+            with spectrum.running(plan.spectrum_config) as run:
+                return run.result(
+                    timeout_s=plan.spectrum_timeout_s
+                )
+\end{lstlisting}
+
+进入 \texttt{connected()} 后才能启动任务，同一服务不能同时存在两个活动任务。离开作用域时，
+服务会停止硬件、恢复连续扫描或原始射频输出，并关闭连接；若正文操作与清理同时失败，程序保留
+主要异常并附加清理错误。这比依赖脚本末尾手工调用 \texttt{close()} 更能覆盖超时和中断路径。
+
+\section{问题二：如何由数字 IQ 波形产生目标微波信号}
+
+\subsection{正交混频与单边带产生}
+
+DAC 的最高输出频率受采样率限制，无法直接覆盖常见的 GHz 量子比特频率。IQ 混频器使用一对
+相差 $90^\circ$ 的本振，将两路基带或中频波形变换到射频。本文采用的符号约定为
+\begin{equation}
+  V_{\mathrm{RF}}(t)=I(t)\cos(\omega_{\mathrm{LO}}t)
+  -Q(t)\sin(\omega_{\mathrm{LO}}t).
+  \label{eq:iq-mixer}
+\end{equation}
+若
+\begin{equation}
+  I(t)=A\cos(\omega_{\mathrm{IF}}t),\qquad
+  Q(t)=A\sin(\omega_{\mathrm{IF}}t),
+  \label{eq:iq-tone}
+\end{equation}
+利用和角公式可得 $V_{\mathrm{RF}}=A\cos[(\omega_{\mathrm{LO}}+
+\omega_{\mathrm{IF}})t]$，即产生上边带。改变 Q 路符号即可选择下边带
+$\omega_{\mathrm{LO}}-\omega_{\mathrm{IF}}$。理想情况下，另一侧的频率分量通过两条混频路径的
+相消而被抑制\cite{analogdevices_iq}，频谱关系如图\ref{fig:iq-spectrum}所示。
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{0.88\linewidth}{!}{\input{figures/iq_spectrum.tex}}
+  \caption{以上边带为目标时的 IQ 上变频频谱示意。实际系统中 LO 和镜像不会完全消失。}
+  \label{fig:iq-spectrum}
+\end{figure}
+
+\subsection{离散波形与同步程序}
+
+离散波形还必须满足两个条件。首先，IF 需要低于奈奎斯特频率 $f_s/2$。其次，循环播放的数组
+若不包含整数个周期，首尾连接处会产生跳变和额外频谱泄漏。程序先把样本数 $N$ 向上对齐到
+8 的倍数，再选取整数周期数 $k$，实际输出频率为
+\begin{equation}
+  f_{\mathrm{IF,actual}}=\frac{k f_s}{N},\qquad
+  k=\operatorname{round}\!\left(\frac{f_{\mathrm{IF,request}}N}{f_s}\right).
+  \label{eq:quantization}
+\end{equation}
+程序同时保留请求频率与量化后的实际频率，避免实验记录把两者混淆。
+
+校准后的波形生成逻辑如下。$g$ 表示 Q/I 增益比，$o_I,o_Q$ 是直流偏置，
+$\phi_c$ 是 Q 路相位修正，$s=+1$ 或 $-1$ 选择上下边带。
+
+\begin{lstlisting}[caption={校准后的同步 IQ 波形生成},label={lst:iq-waveform}]
+phase = 2 * np.pi * k * np.arange(N) / N + phase0
+sideband_sign = 1 if sideband is UPPER else -1
+
+i_samples = i_offset + amplitude * np.cos(phase)
+q_samples = (
+    q_offset
+    + amplitude * q_over_i_gain * sideband_sign
+    * np.sin(phase + q_phase_correction_rad)
+)
+if np.any(np.abs(i_samples) > 1) or np.any(np.abs(q_samples) > 1):
+    raise ValidationError("IQ waveform exceeds DAC range")
+\end{lstlisting}
+
+I/Q 波形随后被封装为同一 DAC 板卡程序。两通道必须具有相同的数组长度、播放列表和播放模式，
+并共享 START/STOP 触发序列，从数据模型层面防止单路更新造成失步。运行次数则根据期望持续时间
+$T$ 和一级触发周期 $T_p$ 计算为 $\lceil T/T_p\rceil$。这些约束把“输出一个微波信号”的物理
+目标转换成了可检查、可复现的数字程序。
+
+\section{问题三：如何自动抑制 LO 泄漏和镜像边带}
+
+\subsection{非理想来源与评价指标}
+
+真实混频器的 I/Q 路存在直流偏置，且 LO 到 RF 端口的隔离有限。将
+$I(t)=o_I+A\cos\omega_{\mathrm{IF}}t$、
+$Q(t)=o_Q+gA\sin(\omega_{\mathrm{IF}}t+\phi_c)$ 代入式\eqref{eq:iq-mixer}，
+可看到偏置项
+\begin{equation}
+  V_{\mathrm{LO,offset}}(t)=o_I\cos\omega_{\mathrm{LO}}t
+  -o_Q\sin\omega_{\mathrm{LO}}t
+  \label{eq:lo-leakage}
+\end{equation}
+恰好位于 LO 频率。另一方面，当 $g\neq1$ 或两路相位不再严格正交时，本应在镜像频率相消的
+分量会残留。器件应用资料同样将直流偏置对应到 LO 泄漏，将增益和正交相位误差对应到镜像
+抑制下降\cite{analogdevices_iq}。
+
+因此，校准分别使用两个指标：LO 改善量和最终镜像抑制度
+\begin{equation}
+  \Delta P_{\mathrm{LO}}
+  =P_{\mathrm{LO,initial}}-P_{\mathrm{LO,final}},\qquad
+  \mathrm{IRR}=P_{\mathrm{target}}-P_{\mathrm{image}}.
+  \label{eq:metrics}
+\end{equation}
+两者单位均为 dB，数值越大分别表示 LO 泄漏改善越明显、目标边带相对镜像越强。
+
+\subsection{两阶段闭环校准}
+
+校准流程如图\ref{fig:calibration-flow}。程序首先在 $f_{\mathrm{LO}}$、
+$f_{\mathrm{LO}}+f_{\mathrm{IF}}$ 和 $f_{\mathrm{LO}}-f_{\mathrm{IF}}$ 三个位置测量基线。
+第一阶段以 LO 处功率为目标函数，在边界内搜索 $(o_I,o_Q)$；第二阶段固定最优偏置，
+以镜像处功率为目标函数搜索 $(g,\phi_c)$。程序使用不要求目标函数梯度的 Powell 方法，
+并设置参数边界与最大函数评估次数\cite{scipy_powell}。
+
+\begin{figure}[htbp]
+  \centering
+  \resizebox{0.96\linewidth}{!}{\input{figures/calibration_flow.tex}}
+  \caption{自动 IQ 校准的数据流与两阶段优化。}
+  \label{fig:calibration-flow}
+\end{figure}
+
+每次目标函数评估都需要重新生成 IQ 波形、上传并运行 MMCS，然后由频谱仪在指定频率完成三次
+标记点测量，取中位数作为目标值。中位数可以降低单次异常读数对搜索方向的影响。若连续若干次
+回调的最优功率改善小于阈值，则提前停止；否则由 Powell 收敛条件或最大评估次数终止。
+
+下面的代码节选自实际校准服务，展示了两个优化阶段的参数分离。这样处理的依据是偏置主要影响
+LO，而增益比和相位主要影响镜像；分阶段搜索还把四维问题拆成两个二维问题，便于限制参数范围
+和解释结果。
+
+\begin{lstlisting}[caption={自动校准的两个优化阶段（省略重复参数）},label={lst:calibration}]
+offset_state = self._optimize_stage(
+    stage="offset",
+    frequency_hz=spec.lo_frequency_hz,
+    x0=np.array([initial.i_offset, initial.q_offset]),
+    bounds=spec.offset_bounds,
+    build_calibration=lambda x: initial.model_copy(
+        update={"i_offset": float(x[0]),
+                "q_offset": float(x[1])}
+    ),
+)
+fixed_offset = offset_state.best_calibration
+imbalance_state = self._optimize_stage(
+    stage="imbalance",
+    frequency_hz=spec.image_frequency_hz,
+    x0=np.array([fixed_offset.q_over_i_gain,
+                 fixed_offset.q_phase_correction_rad]),
+    bounds=spec.imbalance_bounds,
+)
+\end{lstlisting}
+
+为保证可追溯性，SQLite 数据库保存运行所用信号路径、板卡、LO/IF 频率、初始参数、仪器身份、
+每次评估的三次读数、目标值、耗时、终止原因和最终指标。如果过程被中断或发生异常，运行记录
+会分别标记为 interrupted 或 failed。成功后程序只打印一段建议 TOML 配置，不自动修改正在使用的
+配置文件，避免一次异常校准直接污染后续实验。
+
+目前上述闭环流程已在软件层实现，数据库结构也已建立，但仓库中的新版校准数据库没有正式硬件
+运行记录。因此本文不填写假设的 LO 改善量或 IRR。获得实验室运行许可后，应首先记录校准前后
+三点功率和完整频谱，再据此评价实际效果。
+
+\section{与色散读出的联系}
+
+本项目的最终应用背景是超导量子比特的色散读出。当量子比特与谐振腔的失谐
+$\Delta=\omega_q-\omega_r$ 远大于耦合强度 $g$ 时，Jaynes--Cummings 模型可近似为
+\begin{equation}
+  \frac{H_{\mathrm{disp}}}{\hbar}
+  \approx(\omega_r+\chi\sigma_z)a^\dagger a
+  +\frac{1}{2}(\omega_q+\chi)\sigma_z,
+  \qquad \chi\approx\frac{g^2}{\Delta}.
+  \label{eq:dispersive}
+\end{equation}
+其中，谐振腔有效频率随量子比特的 $\sigma_z$ 状态移动约 $\pm\chi$。向谐振腔输入读出微波并
+测量透射或反射信号，两个量子态会对应不同的幅度和相位响应；经过下变频和积分后，它们表现为
+IQ 平面中的不同分布\cite{gambetta2006,blais2021}。
+
+色散读出对本项目提出了直接要求：统一控制 VNA 可用于寻找谐振腔响应，稳定的 IQ 上变频用于
+生成控制或读出微波，混频校准用于减小非目标频率对芯片和测量链路的干扰，而严格的触发模型是
+同步 DAC 与 ADC 的基础。不过，当前新版程序尚未完成 ADC 解调、单次 IQ 数据采集、态分类和
+读出保真度计算，因此色散读出在本文中是下一阶段应用目标，而不是已经完成的实验成果。
+
+\section{验证、局限与个人总结}
+
+\subsection{当前验证结果}
+
+在 2026 年 8 月 2 日使用项目虚拟环境执行离线测试，共收集到 128 个测试：115 个通过，
+8 个失败，5 个需要真实硬件的测试被跳过。通过的测试覆盖 VISA 超时与协议错误、SCPI 数据解析、
+服务连接和运行状态、MMCS 波形与触发约束、自动 IQ 校准模拟流程、数据库成功/失败/中断记录等。
+
+8 个失败集中在配置与扫频解析测试：代码最近把采样点数 \texttt{points} 从共享默认配置移到了
+具体实验参数中，而旧测试仍向默认模型传入该字段。Pydantic 因禁止额外字段而在测试准备阶段
+报错。这说明测试样例与配置模式尚未同步，不能表述为“全部测试通过”；同时，失败范围与原因
+明确，不等同于仪器生命周期或 IQ 校准核心逻辑整体失效。后续应先统一配置示例、解析函数和测试
+夹具，再重新记录测试结果。
+
+\subsection{局限与后续工作}
+
+当前工作的主要局限如下：
+\begin{itemize}
+  \item 自动校准缺少新版硬件数据，尚不能给出真实的 LO 改善量和镜像抑制度；
+  \item 普通持续集成环境无法连接实验室仪器，硬件清理与超时行为仍需现场烟雾测试；
+  \item 新版领域模型虽然已包含部分 ADC 程序结构，但完整解调、IQ 态分类和色散读出闭环尚未实现。
+\end{itemize}
+
+下一阶段应依次完成四项工作：同步 \texttt{points} 配置变更与测试；在安全衰减和输入功率范围内
+运行 IQ 自动校准；保存校准前后频谱及数据库记录；最后接入 ADC 解调、IQ 散点分类和读出保真度
+评估。只有获得可重复的硬件数据后，才能将校准结果从“软件能力”提升为“实验结论”。
+
+通过本次实训，我对量子测控的认识从“调用设备接口输出波形”转向“把物理目标表达为可验证的
+软件模型”。例如，边带选择被表达为 I/Q 的相位关系，频率连续性被表达为整数周期采样，硬件
+安全被表达为生命周期和参数约束，而调节混频器则被表达为带边界、可记录的优化问题。这种映射
+使程序更复杂，但也使实验过程更清晰、可复现，并为后续真正的量子比特测量提供了可靠基础。
+
+\section{结论}
+
+本项目围绕量子测控中的异构仪器控制、IQ 上变频和混频器校准三个问题，完成了分层控制框架、
+同步 IQ 波形模型和两阶段自动校准软件。项目的价值不仅是减少重复的仪器调用代码，更在于把
+通信状态、采样约束、混频误差与优化指标组织成统一且可检查的实验流程。当前成果仍处于控制与
+校准平台阶段；补齐测试一致性并取得正式硬件数据后，程序可进一步扩展到 ADC 解调和色散读出。
+
+\printbibliography[title={参考文献}]
+
+\end{document}

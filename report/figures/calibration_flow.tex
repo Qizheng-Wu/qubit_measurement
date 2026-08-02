@@ -1,0 +1,59 @@
+\begin{tikzpicture}[
+  >=Latex,
+  node distance=0.52cm and 0.72cm,
+  process/.style={
+    draw=mainblue,
+    thick,
+    rounded corners=2pt,
+    fill=lightblue,
+    minimum width=2.35cm,
+    minimum height=0.82cm,
+    align=center,
+    font=\scriptsize
+  },
+  measure/.style={
+    draw=accentorange,
+    thick,
+    rounded corners=2pt,
+    fill=orange!8,
+    minimum width=2.35cm,
+    minimum height=0.82cm,
+    align=center,
+    font=\scriptsize
+  },
+  store/.style={
+    cylinder,
+    shape border rotate=90,
+    aspect=0.28,
+    draw=black!60,
+    fill=softgray,
+    minimum width=1.55cm,
+    minimum height=0.95cm,
+    align=center,
+    font=\scriptsize
+  },
+  flow/.style={->,thick,draw=mainblue}
+]
+  \node[process] (spec) {读取实验规格\\与初始校准参数};
+  \node[measure,right=of spec] (baseline) {三频点基线\\LO / 目标 / 镜像};
+  \node[process,right=of baseline] (offset) {阶段一：Powell\\搜索 $o_I,o_Q$};
+  \node[measure,right=of offset] (lo) {三次测量取中位数\\最小化 LO 功率};
+
+  \node[process,below=0.82cm of lo] (imbalance) {阶段二：Powell\\搜索 $g,\phi_c$};
+  \node[measure,left=of imbalance] (image) {三次测量取中位数\\最小化镜像功率};
+  \node[measure,left=of image] (validation) {最终三频点验证\\计算改善量与 IRR};
+  \node[process,left=of validation] (result) {输出建议 TOML\\不自动激活};
+  \node[store,below=0.62cm of image] (db) {SQLite\\完整轨迹};
+
+  \draw[flow] (spec) -- (baseline);
+  \draw[flow] (baseline) -- (offset);
+  \draw[flow] (offset) -- (lo);
+  \draw[flow] (lo) -- (imbalance);
+  \draw[flow] (imbalance) -- (image);
+  \draw[flow] (image) -- (validation);
+  \draw[flow] (validation) -- (result);
+  \draw[->,thick,dashed,draw=black!55] (baseline) -- (db);
+  \draw[->,thick,dashed,draw=black!55] (lo) -- (db);
+  \draw[->,thick,dashed,draw=black!55] (image) -- (db);
+  \draw[->,thick,dashed,draw=black!55] (validation) -- (db);
+\end{tikzpicture}

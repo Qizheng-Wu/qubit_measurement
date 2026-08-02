@@ -1,0 +1,42 @@
+\begin{tikzpicture}[
+  >=Latex,
+  layer/.style={
+    draw=mainblue,
+    very thick,
+    rounded corners=2pt,
+    fill=lightblue,
+    minimum width=3.4cm,
+    minimum height=0.78cm,
+    align=center,
+    font=\small
+  },
+  side/.style={
+    draw=accentorange,
+    thick,
+    rounded corners=2pt,
+    fill=orange!8,
+    minimum width=3.1cm,
+    minimum height=0.9cm,
+    align=center,
+    font=\small
+  },
+  arrow/.style={->,very thick,draw=mainblue}
+]
+  \node[layer] (experiment) {实验脚本\\物理参数与运行顺序};
+  \node[layer,below=0.42cm of experiment] (service) {服务层\\连接、运行与异常清理};
+  \node[layer,below=0.42cm of service] (driver) {驱动层\\VNA、频谱仪、MMCS 指令};
+  \node[layer,below=0.42cm of driver] (transport) {传输层\\VISA / 厂商 API};
+  \node[layer,below=0.42cm of transport] (hardware) {实验硬件};
+
+  \node[side,right=1.65cm of service] (config) {TOML 配置\\地址、采样率、默认值};
+  \node[side,right=1.65cm of driver] (domain) {不可变领域模型\\波形、扫频、触发、结果};
+
+  \draw[arrow] (experiment) -- (service);
+  \draw[arrow] (service) -- (driver);
+  \draw[arrow] (driver) -- (transport);
+  \draw[arrow] (transport) -- (hardware);
+  \draw[->,thick,dashed,draw=accentorange] (config.west) -- (service.east);
+  \draw[->,thick,dashed,draw=accentorange] (domain.west) -- (driver.east);
+  \draw[->,thick,dashed,draw=accentorange]
+    (config.north west) to[out=145,in=10] (experiment.east);
+\end{tikzpicture}
